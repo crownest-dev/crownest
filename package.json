@@ -10,7 +10,7 @@
     "format:check": "prettier . --check",
     "lint": "eslint --max-warnings=0 .",
     "test": "turbo test",
-    "test:python-sdk": "uv run --project packages/python-sdk pytest packages/python-sdk/tests",
+    "test:python-sdk": "uv run --project packages/python-sdk python -m pytest packages/python-sdk/tests",
     "typecheck": "turbo typecheck",
     "verify": "pnpm build && pnpm lint && pnpm typecheck && pnpm test && pnpm test:python-sdk && pnpm format:check"
   },

@@ -1,0 +1,56 @@
+export const ErrorCode = {
+  BackupNotRestorable: "backup_not_restorable",
+  BackupProjectMismatch: "backup_project_mismatch",
+  BackupTemplateMismatch: "backup_template_mismatch",
+  BillingNotConfigured: "billing_not_configured",
+  CodeSourceTooLarge: "code_source_too_large",
+  DirectoryNotEmpty: "directory_not_empty",
+  FeatureNotEnabled: "feature_not_enabled",
+  FileAlreadyExists: "file_already_exists",
+  FileNotFound: "file_not_found",
+  Forbidden: "forbidden",
+  IdempotencyKeyReused: "idempotency_key_reused",
+  IdempotencyRequestInProgress: "idempotency_request_in_progress",
+  DownloadExportFailed: "download_export_failed",
+  InvalidApiKey: "invalid_api_key",
+  InvalidFileEncoding: "invalid_file_encoding",
+  InvalidRequest: "invalid_request",
+  InvalidMetadataKey: "invalid_metadata_key",
+  InvalidMetadataValue: "invalid_metadata_value",
+  MetadataTooLarge: "metadata_too_large",
+  MetadataTooManyKeys: "metadata_too_many_keys",
+  MissingIdempotencyKey: "missing_idempotency_key",
+  NotFound: "not_found",
+  ParentDirectoryNotFound: "parent_directory_not_found",
+  PathIsDirectory: "path_is_directory",
+  PathNotDirectory: "path_not_directory",
+  PathOutsideWorkspace: "path_outside_workspace",
+  PreviewUnavailable: "preview_unavailable",
+  QuotaExceeded: "quota_exceeded",
+  OrgSuspended: "org_suspended",
+  RateLimited: "rate_limited",
+  ReservedEnvKey: "reserved_env_key",
+  SandboxDestroyed: "sandbox_destroyed",
+  SandboxTtlExceeded: "sandbox_ttl_exceeded",
+  StreamGap: "stream_gap",
+  Unauthorized: "unauthorized",
+  UnsupportedCodeLanguage: "unsupported_code_language",
+  UnsupportedPreviewAuthMode: "unsupported_preview_auth_mode",
+  UnsupportedRuntimeOption: "unsupported_runtime_option",
+  UsageExportInProgress: "usage_export_in_progress",
+  FileTooLarge: "file_too_large",
+  UploadConflict: "upload_conflict",
+  UploadChecksumMismatch: "upload_checksum_mismatch",
+  UploadExpired: "upload_expired",
+  UploadIncomplete: "upload_incomplete",
+  UploadNotFound: "upload_not_found",
+  UploadSizeMismatch: "upload_size_mismatch",
+} as const;
+
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+export type ApiError = {
+  readonly code: ErrorCode;
+  readonly message: string;
+  readonly details?: Record<string, unknown>;
+};

@@ -1,0 +1,56 @@
+{
+  "name": "@crownest/cli",
+  "version": "0.1.0",
+  "description": "Command-line interface for CrowNest cloud sandboxes.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://crownest.dev/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crownest-dev/crownest.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/crownest-dev/crownest/issues"
+  },
+  "keywords": [
+    "sandbox",
+    "ai-agents",
+    "code-interpreter",
+    "code-execution",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "crownest": "./src/index.ts"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "bin": {
+      "crownest": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/index.js && node scripts/rewrite-shebang.mjs dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@crownest/sdk": "workspace:*",
+    "esbuild": "^0.28.0",
+    "tsx": "^4.21.0"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "name": "@crownest/contracts",
+  "version": "0.1.0",
+  "description": "Public TypeScript API contracts for CrowNest cloud sandboxes.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://crownest.dev/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crownest-dev/crownest.git",
+    "directory": "packages/contracts"
+  },
+  "bugs": {
+    "url": "https://github.com/crownest-dev/crownest/issues"
+  },
+  "keywords": [
+    "sandbox",
+    "ai-agents",
+    "code-interpreter",
+    "code-execution"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "types": "./dist/public.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts"
+    },
+    "./ids": {
+      "types": "./src/ids.ts",
+      "import": "./src/ids.ts"
+    },
+    "./resources": {
+      "types": "./src/resources/index.ts",
+      "import": "./src/resources/index.ts"
+    }
+  },
+  "files": [
+    "dist/public.js",
+    "dist/public.d.ts",
+    "dist/public-api.js",
+    "dist/public-api.d.ts",
+    "dist/public-resources.js",
+    "dist/public-resources.d.ts",
+    "dist/errors.js",
+    "dist/errors.d.ts",
+    "dist/ids.js",
+    "dist/ids.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/public.d.ts",
+        "import": "./dist/public.js"
+      },
+      "./errors": {
+        "types": "./dist/errors.d.ts",
+        "import": "./dist/errors.js"
+      },
+      "./ids": {
+        "types": "./dist/ids.d.ts",
+        "import": "./dist/ids.js"
+      },
+      "./resources": {
+        "types": "./dist/public-resources.d.ts",
+        "import": "./dist/public-resources.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/rewrite-dts-extensions.mjs dist && esbuild src/public.ts --bundle --platform=neutral --format=esm --target=es2022 --outfile=dist/public.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}

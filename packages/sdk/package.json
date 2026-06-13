@@ -1,0 +1,61 @@
+{
+  "name": "@crownest/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for CrowNest cloud sandboxes for coding agents.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://crownest.dev/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crownest-dev/crownest.git",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/crownest-dev/crownest/issues"
+  },
+  "keywords": [
+    "sandbox",
+    "ai-agents",
+    "code-interpreter",
+    "code-execution"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/client-types.d.ts",
+    "dist/protocol.d.ts",
+    "dist/sandbox-handle.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/rewrite-dts-extensions.mjs dist && esbuild src/index.ts --bundle --platform=neutral --format=esm --target=es2022 --outfile=dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@crownest/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}

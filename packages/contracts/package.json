@@ -1,6 +1,6 @@
 {
   "name": "@crownest/contracts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Public TypeScript API contracts for CrowNest cloud sandboxes.",
   "license": "Apache-2.0",
   "type": "module",

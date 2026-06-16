@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish npm and PyPI packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Use latest npm
+        run: npm install -g npm@latest
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          version: "0.11.20"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify
+        run: pnpm verify
+
+      - name: Publish npm packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/npm
+
+          publish_package() {
+            local package_dir="$1"
+            local package_name
+            local package_version
+            local marker
+            local tarball
+
+            package_name="$(node -p "require('./${package_dir}/package.json').name")"
+            package_version="$(node -p "require('./${package_dir}/package.json').version")"
+
+            if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+              echo "Skipping ${package_name}@${package_version}; already published."
+              return
+            fi
+
+            marker="$(mktemp)"
+            touch "${marker}"
+            pnpm --filter "${package_name}" pack --pack-destination dist/npm
+            tarball="$(find dist/npm -name '*.tgz' -newer "${marker}" -print -quit)"
+            rm -f "${marker}"
+
+            if [[ -z "${tarball}" ]]; then
+              echo "No tarball produced for ${package_name}." >&2
+              exit 1
+            fi
+
+            npm publish "${tarball}" --access public --provenance
+          }
+
+          publish_package packages/contracts
+          publish_package packages/sdk
+          publish_package packages/ai-sdk
+          publish_package packages/cli
+          publish_package packages/mcp
+
+      - name: Build Python package
+        run: uv build packages/python-sdk --out-dir dist/python --sdist --wheel
+
+      - name: Publish Python package
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/python
+          skip-existing: true

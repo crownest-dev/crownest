@@ -9,7 +9,7 @@ export CROWNEST_API_KEY="cn_live_..."
 
 ```bash
 crownest sandboxes create --template python
-crownest commands run sbx_... "python -c 'print(40 + 2)'"
+crownest commands run sbx_... -- python3 -c 'print(40 + 2)'
 crownest files write sbx_... notes.txt "hello from crownest"
 crownest artifacts create sbx_... notes.txt
 crownest sandboxes kill sbx_...

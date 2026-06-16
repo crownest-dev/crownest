@@ -17,7 +17,7 @@ with CrowNest() as client:
         "from pathlib import Path\nPath('/workspace/output.txt').write_text('hello')\n",
     )
     command = sandbox.commands.run(
-        "python /workspace/main.py",
+        "python3 /workspace/main.py",
         collect=[{"path": "/workspace/output.txt", "name": "output.txt"}],
         collect_on="success",
     )

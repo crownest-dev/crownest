@@ -1,5 +1,18 @@
+import { CrowNestApiError } from "@crownest/sdk";
+
 import { saveCredentialConfig } from "./credential-config";
+import {
+  booleanFlag,
+  jsonFlagSpec,
+  type ParsedFlags,
+  parseFlags,
+  rejectExtraPositionals,
+  stringArrayFlag,
+  stringFlag,
+  UsageError,
+} from "./flags";
 import type { CliEnvironment, CliResult } from "./index";
+import { jsonEnvelope, renderList, renderRecord } from "./output";
 
 type ApiKeyScope = (typeof ApiKeyScopes)[number];
 
@@ -9,30 +22,57 @@ type HumanSession = {
   readonly userId: `usr_${string}`;
 };
 
+type ApiErrorPayload = {
+  readonly error?: {
+    readonly code?: string;
+    readonly details?: Readonly<Record<string, unknown>>;
+    readonly message?: string;
+  };
+};
+
 export function loginCommand(
   args: readonly string[],
   environment: CliEnvironment,
 ): CliResult {
-  const apiKey = optionValue(args, "--api-key") ?? environment.CROWNEST_API_KEY;
+  const parsed = parseFlags(args, {
+    "--api-key": "string",
+    "--api-url": "string",
+    ...jsonFlagSpec,
+  });
+  rejectExtraPositionals(parsed.positionals, "login");
+  const apiKey = stringFlag(parsed.flags, "--api-key") ?? environment.CROWNEST_API_KEY;
   const apiUrl =
-    optionValue(args, "--api-url") ??
+    stringFlag(parsed.flags, "--api-url") ??
     environment.CROWNEST_API_URL ??
     "https://api.crownest.dev";
+  const json = booleanFlag(parsed.flags, "--json");
 
   if (apiKey) {
     saveCredentialConfig(environment, { apiKey, apiUrl });
 
-    return ok(`Saved CrowNest credentials for ${apiUrl}.\n`);
+    return ok(
+      json
+        ? jsonEnvelope({ apiUrl, saved: true })
+        : `Saved CrowNest credentials for ${apiUrl}.\n`,
+    );
   }
 
+  const guidance = [
+    "Create an API key at https://crownest.dev, then run:",
+    `crownest login --api-url ${apiUrl} --api-key cn_live_...`,
+    "",
+    "You can also set CROWNEST_API_KEY and run crownest login to save it.",
+    "",
+  ].join("\n");
+
   return ok(
-    [
-      "Create an API key at https://crownest.dev, then run:",
-      `crownest login --api-url ${apiUrl} --api-key cn_live_...`,
-      "",
-      "You can also set CROWNEST_API_KEY and run crownest login to save it.",
-      "",
-    ].join("\n"),
+    json
+      ? jsonEnvelope({
+          apiUrl,
+          command: `crownest login --api-url ${apiUrl} --api-key cn_live_...`,
+          saved: false,
+        })
+      : guidance,
   );
 }
 
@@ -41,9 +81,17 @@ export async function createApiKeyCommand(
   environment: CliEnvironment,
   fetchImpl: typeof fetch = fetch,
 ): Promise<CliResult> {
+  const parsed = parseFlags(args, {
+    "--api-url": "string",
+    "--name": "string",
+    "--project": "string",
+    "--scope": "string[]",
+    ...jsonFlagSpec,
+  });
+  rejectExtraPositionals(parsed.positionals, "keys create");
   const session = humanSession(environment, "keys create");
-  const response = await fetchImpl(`${apiBaseUrl(args, environment)}/v1/api-keys`, {
-    body: JSON.stringify(createApiKeyBody(args)),
+  const response = await fetchImpl(`${apiBaseUrl(parsed, environment)}/v1/api-keys`, {
+    body: JSON.stringify(createApiKeyBody(parsed)),
     headers: {
       "content-type": "application/json",
       "x-crownest-org-id": session.orgId,
@@ -52,16 +100,24 @@ export async function createApiKeyCommand(
     },
     method: "POST",
   });
-  const payload = (await response.json()) as {
+  const payload = (await response.json()) as ApiErrorPayload & {
     readonly error?: { readonly message: string };
     readonly secret?: string;
   };
 
   if (!response.ok) {
-    throw new Error(payload.error?.message ?? "API key creation failed.");
+    throwApiError(
+      response,
+      payload,
+      "api_key_creation_failed",
+      "API key creation failed.",
+    );
   }
 
-  return ok(`${payload.secret ?? ""}\n`);
+  const result = { secret: payload.secret ?? "" };
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(result) : renderRecord(result),
+  );
 }
 
 export async function listApiKeysCommand(
@@ -69,8 +125,13 @@ export async function listApiKeysCommand(
   environment: CliEnvironment,
   fetchImpl: typeof fetch = fetch,
 ): Promise<CliResult> {
+  const parsed = parseFlags(args, {
+    "--api-url": "string",
+    ...jsonFlagSpec,
+  });
+  rejectExtraPositionals(parsed.positionals, "keys list");
   const session = humanSession(environment, "keys list");
-  const response = await fetchImpl(`${apiBaseUrl(args, environment)}/v1/api-keys`, {
+  const response = await fetchImpl(`${apiBaseUrl(parsed, environment)}/v1/api-keys`, {
     headers: {
       "x-crownest-org-id": session.orgId,
       "x-crownest-role": session.role,
@@ -78,22 +139,38 @@ export async function listApiKeysCommand(
     },
     method: "GET",
   });
-  const payload = (await response.json()) as {
-    readonly data?: readonly unknown[];
+  const payload = (await response.json()) as ApiErrorPayload & {
+    readonly data?: readonly Record<string, unknown>[];
     readonly error?: { readonly message: string };
   };
 
   if (!response.ok) {
-    throw new Error(payload.error?.message ?? "API key listing failed.");
+    throwApiError(
+      response,
+      payload,
+      "api_key_listing_failed",
+      "API key listing failed.",
+    );
   }
 
-  return ok(`${JSON.stringify({ data: payload.data ?? [] }, null, 2)}\n`);
+  const keys = payload.data ?? [];
+  return ok(
+    booleanFlag(parsed.flags, "--json")
+      ? jsonEnvelope(keys)
+      : renderList(keys, [
+          { key: "id" },
+          { key: "name" },
+          { key: "prefix" },
+          { key: "last4" },
+          { key: "createdAt" },
+        ]),
+  );
 }
 
-function createApiKeyBody(args: readonly string[]) {
-  const name = optionValue(args, "--name") ?? "CLI key";
-  const projectId = optionValue(args, "--project");
-  const scopes = scopeOptions(args);
+function createApiKeyBody(parsed: ParsedFlags) {
+  const name = stringFlag(parsed.flags, "--name") ?? "CLI key";
+  const projectId = stringFlag(parsed.flags, "--project");
+  const scopes = scopeOptions(parsed);
 
   return {
     name,
@@ -102,19 +179,26 @@ function createApiKeyBody(args: readonly string[]) {
   };
 }
 
-function scopeOptions(args: readonly string[]): readonly ApiKeyScope[] {
-  const scopes: ApiKeyScope[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--scope") {
-      const scope = requiredArg(args[index + 1], "scope");
-      if (!(ApiKeyScopes as readonly string[]).includes(scope)) {
-        throw new Error(`invalid API key scope: ${scope}`);
-      }
-      scopes.push(scope as ApiKeyScope);
+function scopeOptions(parsed: ParsedFlags): readonly ApiKeyScope[] {
+  return stringArrayFlag(parsed.flags, "--scope").map((scope) => {
+    if (!(ApiKeyScopes as readonly string[]).includes(scope)) {
+      throw new UsageError(`invalid API key scope: ${scope}`);
     }
-  }
+    return scope as ApiKeyScope;
+  });
+}
 
-  return scopes;
+function throwApiError(
+  response: Response,
+  payload: ApiErrorPayload,
+  fallbackCode: string,
+  fallbackMessage: string,
+): never {
+  throw new CrowNestApiError(response.status, {
+    code: payload.error?.code ?? fallbackCode,
+    ...(payload.error?.details === undefined ? {} : { details: payload.error.details }),
+    message: payload.error?.message ?? fallbackMessage,
+  });
 }
 
 function humanSession(environment: CliEnvironment, command: string): HumanSession {
@@ -135,25 +219,12 @@ function humanSession(environment: CliEnvironment, command: string): HumanSessio
   return { orgId: orgId as `org_${string}`, role, userId: userId as `usr_${string}` };
 }
 
-function apiBaseUrl(args: readonly string[], environment: CliEnvironment): string {
+function apiBaseUrl(parsed: ParsedFlags, environment: CliEnvironment): string {
   return (
-    optionValue(args, "--api-url") ??
+    stringFlag(parsed.flags, "--api-url") ??
     environment.CROWNEST_API_URL ??
     "http://127.0.0.1:8787"
   ).replace(/\/$/, "");
-}
-
-function optionValue(args: readonly (string | undefined)[], flag: string) {
-  const index = args.indexOf(flag);
-  return index < 0 ? undefined : args[index + 1];
-}
-
-function requiredArg(value: string | undefined, label: string): string {
-  if (!value) {
-    throw new Error(`${label} is required.`);
-  }
-
-  return value;
 }
 
 function ok(stdout: string): CliResult {
@@ -202,4 +273,6 @@ const ApiKeyScopes = [
   "backup:delete",
   "usage:read",
   "api_key:read",
+  "api_key:revoke",
+  "project:create",
 ] as const;

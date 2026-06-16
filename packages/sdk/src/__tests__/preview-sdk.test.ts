@@ -87,7 +87,7 @@ function previewResponseBody(
     projectId: "prj_123",
     sandboxId: "sbx_123",
     slug: "p-a1b2c3",
-    url: "https://p-a1b2c3.preview.crownest.dev",
+    url: "https://p-a1b2c3.crownest.dev",
   };
 }
 

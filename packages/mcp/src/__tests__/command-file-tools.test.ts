@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { callTool, createHarness, createSandboxHandle, text } from "./mcp-test-helpers";
 
-describe("command and file tools", () => {
+describe("run_command", () => {
   it("runs Commands with optional cwd and timeout", async () => {
     const sandbox = createSandboxHandle("sbx_command");
     sandbox.mocks.commandRun.mockResolvedValueOnce(commandResult("sbx_command"));
@@ -18,11 +18,14 @@ describe("command and file tools", () => {
       cwd: "/workspace/app",
       timeoutMs: 500,
     });
+    expect(text(result)).toContain("command_id: cmd_123");
     expect(text(result)).toContain("exit_code: 0");
     expect(text(result)).toContain("stdout:\n");
     expect(text(result)).toContain("stderr:\n");
   });
+});
 
+describe("Workspace read/write tools", () => {
   it("writes, reads, and lists Workspace files", async () => {
     const sandbox = createSandboxHandle("sbx_files");
     sandbox.mocks.fileWrite.mockResolvedValueOnce(fileStat());
@@ -44,7 +47,105 @@ describe("command and file tools", () => {
     expect(text(read)).toContain('"content": "hello"');
     expect(text(list)).toContain('"sandbox_id": "sbx_files"');
   });
+});
 
+describe("Command inspection tools", () => {
+  it("inspects, cancels, and reads bounded Command logs", async () => {
+    const sandbox = createSandboxHandle("sbx_default");
+    const { client, tools } = createHarness([sandbox]);
+    client.mocks.getCommand.mockResolvedValueOnce(commandResult("sbx_default"));
+    client.mocks.cancelCommand.mockResolvedValueOnce({
+      ...commandResult("sbx_default"),
+      status: "exited",
+    });
+    client.mocks.readCommandLogs.mockResolvedValueOnce([
+      commandLog("stdout", "one\ntwo\n"),
+      commandLog("stderr", "three\n"),
+    ]);
+
+    const command = await callTool(tools, "get_command", {
+      command_id: "cmd_123",
+    });
+    const canceled = await callTool(tools, "cancel_command", {
+      command_id: "cmd_123",
+      mode: "force",
+    });
+    const logs = await callTool(tools, "stream_command_logs", {
+      command_id: "cmd_123",
+      max_lines: 2,
+    });
+
+    expect(client.mocks.getCommand).toHaveBeenCalledWith("cmd_123");
+    expect(client.mocks.cancelCommand).toHaveBeenCalledWith("cmd_123", {
+      mode: "force",
+    });
+    expect(client.mocks.readCommandLogs).toHaveBeenCalledWith("cmd_123", {
+      limit: 3,
+    });
+    expect(text(command)).toContain('"command_id": "cmd_123"');
+    expect(text(canceled)).toContain('"status": "exited"');
+    expect(text(logs)).toContain("truncated: true");
+    expect(text(logs)).toContain("stdout: one");
+    expect(text(logs)).toContain("[truncated after 2 lines]");
+  });
+
+  it("uses an API-safe default Command log replay limit", async () => {
+    const { client, tools } = createHarness([createSandboxHandle("sbx_default")]);
+    client.mocks.readCommandLogs.mockResolvedValueOnce([]);
+
+    const logs = await callTool(tools, "stream_command_logs", {
+      command_id: "cmd_123",
+    });
+
+    expect(client.mocks.readCommandLogs).toHaveBeenCalledWith("cmd_123", {
+      limit: 100,
+    });
+    expect(text(logs)).toContain("max_lines: 99");
+  });
+});
+
+describe("Workspace mutation tools", () => {
+  it("deletes, moves, creates, and stats Workspace files", async () => {
+    const sandbox = createSandboxHandle("sbx_files");
+    sandbox.mocks.fileMove.mockResolvedValueOnce(fileStat("/workspace/b.txt"));
+    sandbox.mocks.fileMkdir.mockResolvedValueOnce(directoryStat());
+    sandbox.mocks.fileStat.mockResolvedValueOnce(fileStat("/workspace/b.txt"));
+    const { tools } = createHarness([sandbox]);
+
+    const deleted = await callTool(tools, "delete_file", {
+      path: "/workspace/a.txt",
+    });
+    const moved = await callTool(tools, "move_file", {
+      from: "/workspace/a.txt",
+      overwrite: true,
+      to: "/workspace/b.txt",
+    });
+    const directory = await callTool(tools, "make_directory", {
+      parents: true,
+      path: "/workspace/out",
+    });
+    const stat = await callTool(tools, "stat_file", {
+      path: "/workspace/b.txt",
+    });
+
+    expect(sandbox.mocks.fileDelete).toHaveBeenCalledWith("/workspace/a.txt");
+    expect(sandbox.mocks.fileMove).toHaveBeenCalledWith(
+      "/workspace/a.txt",
+      "/workspace/b.txt",
+      { overwrite: true },
+    );
+    expect(sandbox.mocks.fileMkdir).toHaveBeenCalledWith("/workspace/out", {
+      parents: true,
+    });
+    expect(sandbox.mocks.fileStat).toHaveBeenCalledWith("/workspace/b.txt");
+    expect(text(deleted)).toContain('"deleted": true');
+    expect(text(moved)).toContain('"path": "/workspace/b.txt"');
+    expect(text(directory)).toContain('"type": "directory"');
+    expect(text(stat)).toContain('"size_bytes": 5');
+  });
+});
+
+describe("explicit Sandbox routing", () => {
   it("routes stateful tools to an explicit non-default Sandbox id", async () => {
     const defaultSandbox = createSandboxHandle("sbx_default");
     const explicitSandbox = createSandboxHandle("sbx_explicit");
@@ -82,6 +183,16 @@ function commandResult(sandboxId: `sbx_${string}`) {
   };
 }
 
+function commandLog(stream: "stderr" | "stdout", data: string) {
+  return {
+    commandId: "cmd_123",
+    createdAt: "2026-06-12T12:00:00.000Z",
+    data,
+    seq: stream === "stdout" ? 1 : 2,
+    stream,
+  };
+}
+
 function fileInput() {
   return {
     content: "hello",
@@ -103,11 +214,21 @@ function explicitReadInput() {
   };
 }
 
-function fileStat() {
+function fileStat(path = "/workspace/a.txt") {
   return {
-    path: "/workspace/a.txt",
+    modifiedAt: "2026-06-12T12:00:00.000Z",
+    path,
     sizeBytes: 5,
     type: "file",
+  };
+}
+
+function directoryStat() {
+  return {
+    modifiedAt: "2026-06-12T12:00:00.000Z",
+    path: "/workspace/out",
+    sizeBytes: 0,
+    type: "directory",
   };
 }
 

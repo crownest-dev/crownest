@@ -17,11 +17,99 @@ function registerFactoryTests() {
   it("exposes the canonical CrowNest client factory", () => {
     const client = createCrowNestClient({ apiKey: "cnk_test_key" });
 
+    expect(typeof client.apiKeys.list).toBe("function");
+    expect(typeof client.apiKeys.get).toBe("function");
+    expect(typeof client.apiKeys.revoke).toBe("function");
     expect(typeof client.code.runStream).toBe("function");
+    expect(typeof client.code.listContexts).toBe("function");
+    expect(typeof client.projects.create).toBe("function");
     expect(typeof client.sandboxes.create).toBe("function");
     expect(typeof client.sandboxes.extend).toBe("function");
     expect(typeof client.sandboxes.get).toBe("function");
     expect(typeof client.usage).toBe("function");
+  });
+
+  it("exposes CRUD completion helpers on root clients and sandbox handles", async () => {
+    const context = {
+      createdAt: "2026-06-09T15:30:00.000Z",
+      cwd: "/workspace",
+      id: "cctx_123",
+      language: "python",
+      sandboxId: "sbx_123",
+    };
+    const apiKey = {
+      createdAt: "2026-06-09T15:30:00.000Z",
+      createdByUserId: "usr_123",
+      id: "key_123",
+      last4: "test",
+      name: "Manager",
+      orgId: "org_123",
+      prefix: "cn_live_test",
+      scopes: ["api_key:read", "api_key:revoke"],
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ data: [apiKey], hasMore: false }))
+      .mockResolvedValueOnce(jsonResponse({ apiKey }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          apiKey: { ...apiKey, revokedAt: "2026-06-09T16:00:00.000Z" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          project: {
+            createdAt: "2026-06-09T15:30:00.000Z",
+            id: "prj_created",
+            name: "Agent Workspace",
+            orgId: "org_123",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: [context], hasMore: false }))
+      .mockResolvedValueOnce(jsonResponse({ context }))
+      .mockResolvedValueOnce(sandboxResponse())
+      .mockResolvedValueOnce(jsonResponse({ data: [context], hasMore: false }))
+      .mockResolvedValueOnce(jsonResponse({ context }));
+    const client = createCrowNestClient({
+      apiKey: "cn_live_test",
+      baseUrl: "https://api.test",
+      fetch: fetchMock,
+    });
+
+    await expect(client.apiKeys.list()).resolves.toEqual([apiKey]);
+    await expect(client.apiKeys.get("key_123")).resolves.toEqual(apiKey);
+    await expect(client.apiKeys.revoke("key_123")).resolves.toMatchObject({
+      revokedAt: "2026-06-09T16:00:00.000Z",
+    });
+    await expect(
+      client.projects.create({ name: "Agent Workspace" }),
+    ).resolves.toMatchObject({ id: "prj_created" });
+    await expect(client.code.listContexts("sbx_123")).resolves.toEqual([context]);
+    await expect(client.code.getContext("sbx_123", "cctx_123")).resolves.toEqual(
+      context,
+    );
+
+    const sandbox = await client.sandboxes.get("sbx_123");
+    await expect(sandbox.code.listContexts()).resolves.toEqual([context]);
+    await expect(sandbox.code.getContext("cctx_123")).resolves.toEqual(context);
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.test/v1/api-keys",
+      "https://api.test/v1/api-keys/key_123",
+      "https://api.test/v1/api-keys/key_123",
+      "https://api.test/v1/projects",
+      "https://api.test/v1/sandboxes/sbx_123/code/contexts",
+      "https://api.test/v1/sandboxes/sbx_123/code/contexts/cctx_123",
+      "https://api.test/v1/sandboxes/sbx_123",
+      "https://api.test/v1/sandboxes/sbx_123/code/contexts",
+      "https://api.test/v1/sandboxes/sbx_123/code/contexts/cctx_123",
+    ]);
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: "DELETE" });
+    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({
+      body: JSON.stringify({ name: "Agent Workspace" }),
+      method: "POST",
+    });
   });
 }
 
@@ -173,6 +261,19 @@ function registerSandboxCommandHandleTests() {
             status: "exited",
           },
         }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          command: {
+            cancelMode: "force",
+            command: "python main.py",
+            cwd: "/workspace",
+            env: {},
+            id: "cmd_123",
+            sandboxId: "sbx_123",
+            status: "canceled",
+          },
+        }),
       );
     const client = createCrowNestClient({
       apiKey: "cn_live_test",
@@ -186,10 +287,12 @@ function registerSandboxCommandHandleTests() {
       ttlMs: 5_400_000,
     });
     const command = await extended.commands.run("python main.py");
+    const canceled = await extended.commands.cancel("cmd_123", { mode: "force" });
 
     expect(sandbox.id).toBe("sbx_123");
     expect(extended.ttlMs).toBe(5_400_000);
     expect(command.id).toBe("cmd_123");
+    expect(canceled.status).toBe("canceled");
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.test/v1/sandboxes",
       expect.objectContaining({
@@ -211,6 +314,13 @@ function registerSandboxCommandHandleTests() {
     const extendHeaders = fetchMock.mock.calls[1]?.[1]?.headers;
     expect(extendHeaders).toBeInstanceOf(Headers);
     expect((extendHeaders as Headers).get("idempotency-key")).toBe("extend-key");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.test/v1/commands/cmd_123/cancel",
+      expect.objectContaining({
+        body: JSON.stringify({ mode: "force" }),
+        method: "POST",
+      }),
+    );
   });
 }
 

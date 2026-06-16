@@ -7,7 +7,17 @@ import type {
   MessageExtraInfo,
 } from "@modelcontextprotocol/sdk/types.js";
 
-export const toolsAcceptingOmittedArguments = new Set(["create_sandbox", "list_files"]);
+export const toolsAcceptingOmittedArguments = new Set([
+  "create_sandbox",
+  "list_files",
+  "list_sandboxes",
+  "get_usage",
+  "get_sandbox",
+  "list_artifacts",
+  "list_previews",
+  "list_code_contexts",
+  "list_api_keys",
+]);
 
 export class OmittedArgumentsTransport implements Transport {
   onclose?: () => void;

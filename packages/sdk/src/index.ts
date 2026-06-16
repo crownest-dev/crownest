@@ -1,16 +1,20 @@
 import type {
   ArtifactDownloadUrlResponse,
+  CreateProjectResponse,
   CreateSandboxResponse,
   DeleteArtifactResponse,
   DeletePreviewResponse,
   ExtendSandboxResponse,
+  GetApiKeyResponse,
   GetArtifactResponse,
   GetCommandResponse,
   GetPreviewResponse,
   GetSandboxResponse,
+  ListApiKeysResponse,
   ListCommandLogsResponse,
   ListProjectsResponse,
   ListSandboxesResponse,
+  RevokeApiKeyResponse,
   UsageSummaryResponse,
 } from "@crownest/contracts";
 
@@ -39,6 +43,7 @@ import {
 export type {
   CodeArtifactPolicy,
   CodeLanguage,
+  CreateProjectInput,
   CreateSandboxInput,
   CrowNestClient,
   ExtendSandboxInput,
@@ -48,12 +53,19 @@ export type { CrowNestClientOptions, RunCommandOptions } from "./protocol";
 export { CrowNestApiError } from "./protocol";
 export type { SandboxHandle } from "./sandbox-handle";
 
+/**
+ * Create a CrowNest TypeScript client for Sandbox, Command, Code Run,
+ * Workspace file, Artifact, Preview, Project, API Key, and usage APIs.
+ * @param options - Optional API key, base URL, fetch implementation, and timeout settings.
+ * @returns A typed CrowNestClient with grouped resource helpers.
+ */
 export function createCrowNestClient(
   options: CrowNestClientOptions = {},
 ): CrowNestClient {
   const transport = createTransport(options);
 
   return {
+    apiKeys: createApiKeyClient(transport),
     artifacts: createArtifactClient(transport),
     code: createCodeClient(transport),
     commands: createCommandClient(transport),
@@ -77,11 +89,42 @@ function createCodeClient(transport: Transport): CrowNestClient["code"] {
     deleteContext(sandboxId, contextId) {
       return createSandboxCodeClient(sandboxId, transport).deleteContext(contextId);
     },
+    getContext(sandboxId, contextId) {
+      return createSandboxCodeClient(sandboxId, transport).getContext(contextId);
+    },
+    listContexts(sandboxId) {
+      return createSandboxCodeClient(sandboxId, transport).listContexts();
+    },
     run(sandboxId, input) {
       return createSandboxCodeClient(sandboxId, transport).run(input);
     },
     runStream(sandboxId, input) {
       return createSandboxCodeClient(sandboxId, transport).runStream(input);
+    },
+  };
+}
+
+function createApiKeyClient(transport: Transport): CrowNestClient["apiKeys"] {
+  return {
+    async get(apiKeyId) {
+      const response = await transport.request<GetApiKeyResponse>(
+        `/v1/api-keys/${apiKeyId}`,
+        { method: "GET" },
+      );
+      return response.apiKey;
+    },
+    async list() {
+      const response = await transport.request<ListApiKeysResponse>("/v1/api-keys", {
+        method: "GET",
+      });
+      return response.data;
+    },
+    async revoke(apiKeyId) {
+      const response = await transport.request<RevokeApiKeyResponse>(
+        `/v1/api-keys/${apiKeyId}`,
+        { method: "DELETE" },
+      );
+      return response.apiKey;
     },
   };
 }
@@ -186,6 +229,13 @@ function createPreviewClient(transport: Transport): CrowNestClient["previews"] {
 
 function createProjectClient(transport: Transport): CrowNestClient["projects"] {
   return {
+    async create(input) {
+      const response = await transport.request<CreateProjectResponse>("/v1/projects", {
+        body: input,
+        method: "POST",
+      });
+      return response.project;
+    },
     async list() {
       const response = await transport.request<ListProjectsResponse>("/v1/projects", {
         method: "GET",

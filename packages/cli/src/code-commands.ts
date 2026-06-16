@@ -2,10 +2,27 @@ import { readFile } from "node:fs/promises";
 
 import type { CodeArtifactPolicy, CodeLanguage, CrowNestClient } from "@crownest/sdk";
 
+import {
+  type CodeExecutionError,
+  renderCodeOutput,
+  renderExecutionError,
+  writeChunk,
+  writeCodeChunks,
+  writeCodeOutputs,
+} from "./code-rendering";
+import { CLI_EXIT_API_ERROR, CLI_EXIT_OK, CLI_EXIT_USAGE_ERROR } from "./exit-codes";
+import {
+  jsonFlagSpec,
+  parseFlags,
+  rejectExtraPositionals,
+  requiredArg,
+  stringFlag,
+  UsageError,
+} from "./flags";
 import type { CliOutput, CliResult } from "./index";
 
 export async function codeRunCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
   output?: CliOutput,
 ): Promise<CliResult> {
@@ -13,37 +30,59 @@ export async function codeRunCommand(
     return await codeRunCommandInner(client, args, output);
   } catch (error) {
     if (error instanceof UsageError) {
-      return fail(`${error.message}\n`, 2);
+      return fail(`${error.message}\n`, CLI_EXIT_USAGE_ERROR);
     }
     throw error;
   }
 }
 
 async function codeRunCommandInner(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
   output?: CliOutput,
 ): Promise<CliResult> {
-  const sandboxId = sandboxIdArg(args[0]);
-  const codeValue = optionValue(args, "--code");
-  const fileValue = optionValue(args, "--file");
+  const parsed = parseFlags(args, {
+    "--artifact-policy": "string",
+    "--code": "string",
+    "--context": "string",
+    "--cwd": "string",
+    "--file": "string",
+    "--idempotency-key": "string",
+    "--language": "string",
+    "--timeout-ms": "string",
+    ...jsonFlagSpec,
+  });
+  const sandboxId = sandboxIdArg(parsed.positionals[0]);
+  rejectExtraPositionals(parsed.positionals.slice(1), "code run");
+  const codeValue = stringFlag(parsed.flags, "--code");
+  const fileValue = stringFlag(parsed.flags, "--file");
 
   if (
     (codeValue === undefined && fileValue === undefined) ||
     (codeValue !== undefined && fileValue !== undefined)
   ) {
-    return fail("Use exactly one of --code <source> or --file <path>.\n", 2);
+    return fail(
+      "Use exactly one of --code <source> or --file <path>.\n",
+      CLI_EXIT_USAGE_ERROR,
+    );
   }
 
-  const language = languageOption(optionValue(args, "--language"));
-  const artifactPolicy = artifactPolicyOption(optionValue(args, "--artifact-policy"));
-  const timeoutMs = optionalPositiveIntegerOption(args, "--timeout-ms");
-  const contextId = optionValue(args, "--context") as `cctx_${string}` | undefined;
-  const cwd = optionValue(args, "--cwd");
-  const idempotencyKey = optionValue(args, "--idempotency-key");
+  const language = languageOption(stringFlag(parsed.flags, "--language"));
+  const artifactPolicy = artifactPolicyOption(
+    stringFlag(parsed.flags, "--artifact-policy"),
+  );
+  const timeoutMs = optionalPositiveIntegerOption(
+    stringFlag(parsed.flags, "--timeout-ms"),
+    "--timeout-ms",
+  );
+  const contextId = stringFlag(parsed.flags, "--context") as
+    | `cctx_${string}`
+    | undefined;
+  const cwd = stringFlag(parsed.flags, "--cwd");
+  const idempotencyKey = stringFlag(parsed.flags, "--idempotency-key");
   const code = codeValue ?? (await readFile(requiredArg(fileValue, "file"), "utf8"));
   return collectCodeRunStream(
-    client.code.runStream(sandboxId, {
+    client().code.runStream(sandboxId, {
       code,
       ...(artifactPolicy === undefined ? {} : { artifactPolicy }),
       ...(contextId === undefined ? {} : { contextId }),
@@ -56,15 +95,7 @@ async function codeRunCommandInner(
   );
 }
 
-class UsageError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "UsageError";
-  }
-}
-
 type ExecutionErrorState = {
-  readonly message: string;
   readonly rendered: boolean;
 };
 
@@ -124,7 +155,7 @@ async function collectCodeRunStream(
   }
 
   if (executionError !== undefined) {
-    return codeRunResult(1, stdout, stderr, output);
+    return codeRunResult(CLI_EXIT_API_ERROR, stdout, stderr, output);
   }
 
   if (!completed) {
@@ -132,28 +163,10 @@ async function collectCodeRunStream(
       output?.stderr,
       "Error: code run stream ended before a complete event.\n",
     );
-    return codeRunResult(1, stdout, stderr, output);
+    return codeRunResult(CLI_EXIT_API_ERROR, stdout, stderr, output);
   }
 
-  return codeRunResult(0, stdout, stderr, output);
-}
-
-function writeCodeChunks(
-  stream: { write(chunk: string): void } | undefined,
-  chunks: readonly string[],
-) {
-  return chunks.reduce((rendered, chunk) => rendered + writeChunk(stream, chunk), "");
-}
-
-function writeCodeOutputs(
-  stream: { write(chunk: string): void } | undefined,
-  outputs: readonly Parameters<typeof renderCodeOutput>[0][],
-) {
-  return outputs.reduce(
-    (rendered, codeOutput) =>
-      rendered + writeChunk(stream, renderCodeOutput(codeOutput)),
-    "",
-  );
+  return codeRunResult(CLI_EXIT_OK, stdout, stderr, output);
 }
 
 function codeRunResult(
@@ -166,59 +179,20 @@ function codeRunResult(
 }
 
 function renderExecutionErrorEvent(
-  error: {
-    readonly message: string;
-    readonly name?: string;
-  },
+  error: CodeExecutionError,
   current: ExecutionErrorState | undefined,
 ): { readonly state: ExecutionErrorState; readonly stderr: string } {
   if (current?.rendered) {
     return {
-      state: { message: error.message, rendered: true },
+      state: { rendered: true },
       stderr: "",
     };
   }
 
   return {
-    state: { message: error.message, rendered: true },
+    state: { rendered: true },
     stderr: renderExecutionError(error),
   };
-}
-
-function renderExecutionError(error: {
-  readonly message: string;
-  readonly name?: string;
-}): string {
-  return `${error.name ?? "Error"}: ${error.message}\n`;
-}
-
-function renderCodeOutput(output: {
-  readonly artifactId?: string;
-  readonly contentType?: string;
-  readonly format: string;
-  readonly kind: string;
-  readonly reason?: string;
-  readonly sizeBytes?: number;
-  readonly value?: unknown;
-}): string {
-  if (output.kind === "artifact") {
-    return `[artifact ${output.artifactId} ${output.contentType} ${output.sizeBytes}B]\n`;
-  }
-  if (output.kind === "rejected") {
-    return `[rejected ${output.format} ${output.reason}]\n`;
-  }
-  if (typeof output.value === "string") {
-    return `${output.value}\n`;
-  }
-  return `${JSON.stringify(output.value)}\n`;
-}
-
-function writeChunk(stream: { write(chunk: string): void } | undefined, chunk: string) {
-  if (stream) {
-    stream.write(chunk);
-    return "";
-  }
-  return chunk;
 }
 
 function languageOption(value: string | undefined): CodeLanguage {
@@ -238,33 +212,15 @@ function artifactPolicyOption(
 }
 
 function optionalPositiveIntegerOption(
-  args: readonly string[],
+  value: string | undefined,
   flag: string,
 ): number | undefined {
-  const value = optionValue(args, flag);
   if (value === undefined) return undefined;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new UsageError(`${flag} must be a positive integer.`);
   }
   return parsed;
-}
-
-function optionValue(args: readonly (string | undefined)[], flag: string) {
-  const index = args.indexOf(flag);
-  if (index < 0) return undefined;
-  const value = args[index + 1];
-  if (value === undefined || value.startsWith("--")) {
-    throw new UsageError(`${flag} requires a value.`);
-  }
-  return value;
-}
-
-function requiredArg(value: string | undefined, label: string): string {
-  if (!value) {
-    throw new UsageError(`${label} is required.`);
-  }
-  return value;
 }
 
 function sandboxIdArg(value: string | undefined): `sbx_${string}` {

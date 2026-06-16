@@ -1,136 +1,180 @@
 import { readFile as readFileBytes } from "node:fs/promises";
+import { basename } from "node:path";
 
 import type { CrowNestClient } from "@crownest/sdk";
 
+import {
+  booleanFlag,
+  jsonFlagSpec,
+  parseFlags,
+  rejectExtraPositionals,
+  requiredArg,
+  requiredPrefixedArg,
+  stringFlag,
+} from "./flags";
 import type { CliResult } from "./index";
+import { jsonEnvelope, renderList, renderRecord } from "./output";
 
 export async function deleteFileCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  await client.files.delete(
-    requiredSandboxId(args[0], "sandbox id"),
-    requiredArg(args[1], "path"),
+  const parsed = parseFlags(args, jsonFlagSpec);
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  const path = requiredArg(parsed.positionals[1], "path");
+  rejectExtraPositionals(parsed.positionals.slice(2), "files delete");
+  await client().files.delete(sandboxId, path);
+  const result = { path, status: "deleted" };
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(result) : renderRecord(result),
   );
-  return ok("deleted\n");
 }
 
 export async function listFilesCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const files = await client.files.list(
-    requiredSandboxId(args[0], "sandbox id"),
-    args[1],
+  const parsed = parseFlags(args, jsonFlagSpec);
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  const path = parsed.positionals[1];
+  rejectExtraPositionals(parsed.positionals.slice(2), "files list");
+  const files = await client().files.list(sandboxId, path);
+  return ok(
+    booleanFlag(parsed.flags, "--json")
+      ? jsonEnvelope(files)
+      : renderList(files, [
+          { key: "path" },
+          { key: "type" },
+          { key: "sizeBytes", label: "size" },
+          { key: "modifiedAt" },
+        ]),
   );
-  return ok(`${JSON.stringify({ data: files }, null, 2)}\n`);
 }
 
 export async function mkdirCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const file = await client.files.mkdir(
-    requiredSandboxId(args[0], "sandbox id"),
-    requiredArg(args[1], "path"),
-    {
-      parents: args.includes("--parents"),
-    },
+  const parsed = parseFlags(args, {
+    "--parents": "boolean",
+    ...jsonFlagSpec,
+  });
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  const path = requiredArg(parsed.positionals[1], "path");
+  rejectExtraPositionals(parsed.positionals.slice(2), "files mkdir");
+  const file = await client().files.mkdir(sandboxId, path, {
+    parents: booleanFlag(parsed.flags, "--parents"),
+  });
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(file) : renderRecord(file),
   );
-  return ok(`${file.path}\n`);
 }
 
 export async function moveFileCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const file = await client.files.move(
-    requiredSandboxId(args[0], "sandbox id"),
-    requiredArg(args[1], "from"),
-    requiredArg(args[2], "to"),
-    { overwrite: args.includes("--overwrite") },
+  const parsed = parseFlags(args, {
+    "--overwrite": "boolean",
+    ...jsonFlagSpec,
+  });
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  const from = requiredArg(parsed.positionals[1], "from");
+  const to = requiredArg(parsed.positionals[2], "to");
+  rejectExtraPositionals(parsed.positionals.slice(3), "files move");
+  const file = await client().files.move(sandboxId, from, to, {
+    overwrite: booleanFlag(parsed.flags, "--overwrite"),
+  });
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(file) : renderRecord(file),
   );
-  return ok(`${file.path}\n`);
 }
 
 export async function readFileCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const content = await client.files.read(
-    requiredSandboxId(args[0], "sandbox id"),
-    requiredArg(args[1], "path"),
-  );
-  return ok(content);
+  const parsed = parseFlags(args, jsonFlagSpec);
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  const path = requiredArg(parsed.positionals[1], "path");
+  rejectExtraPositionals(parsed.positionals.slice(2), "files read");
+  const content = await client().files.read(sandboxId, path);
+  return ok(booleanFlag(parsed.flags, "--json") ? jsonEnvelope(content) : content);
 }
 
 export async function statFileCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const file = await client.files.stat(
-    requiredSandboxId(args[0], "sandbox id"),
-    requiredArg(args[1], "path"),
+  const parsed = parseFlags(args, jsonFlagSpec);
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  const path = requiredArg(parsed.positionals[1], "path");
+  rejectExtraPositionals(parsed.positionals.slice(2), "files stat");
+  const file = await client().files.stat(sandboxId, path);
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(file) : renderRecord(file),
   );
-  return ok(`${JSON.stringify(file, null, 2)}\n`);
 }
 
 export async function uploadFileCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const sandboxId = requiredSandboxId(args[0], "sandbox id");
-  const localPath = requiredArg(args[1], "local path");
-  const remotePath = optionValue(args, "--to") ?? requiredArg(args[2], "remote path");
+  const parsed = parseFlags(args, {
+    "--create-parents": "boolean",
+    "--to": "string",
+    ...jsonFlagSpec,
+  });
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  const localPath = requiredArg(parsed.positionals[1], "local path");
+  const remotePathFlag = stringFlag(parsed.flags, "--to");
+  const positionalRemotePath = parsed.positionals[2];
+  const remotePath = remotePathFlag ?? positionalRemotePath ?? basename(localPath);
+  rejectExtraPositionals(
+    parsed.positionals.slice(
+      remotePathFlag === undefined && positionalRemotePath !== undefined ? 3 : 2,
+    ),
+    "files upload",
+  );
   const content = await readFileBytes(localPath);
-  const file = await client.files.write(
+  const file = await client().files.write(
     sandboxId,
     remotePath,
     content.toString("base64"),
     {
-      createParents: args.includes("--create-parents"),
+      createParents: booleanFlag(parsed.flags, "--create-parents"),
       encoding: "base64",
     },
   );
 
-  return ok(`${file.path}\n`);
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(file) : renderRecord(file),
+  );
 }
 
 export async function writeFileCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const file = await client.files.write(
-    requiredSandboxId(args[0], "sandbox id"),
-    requiredArg(args[1], "path"),
-    requiredArg(args[2], "content"),
-    { createParents: args.includes("--create-parents") },
+  const [sandboxIdArg, pathArg, contentArg, ...flagArgs] = args;
+  const parsed = parseFlags(flagArgs, {
+    "--create-parents": "boolean",
+    ...jsonFlagSpec,
+  });
+  const sandboxId = requiredSandboxId(sandboxIdArg, "sandbox id");
+  const path = requiredArg(pathArg, "path");
+  const content = requiredArg(contentArg, "content");
+  rejectExtraPositionals(parsed.positionals, "files write");
+  const file = await client().files.write(sandboxId, path, content, {
+    createParents: booleanFlag(parsed.flags, "--create-parents"),
+  });
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(file) : renderRecord(file),
   );
-  return ok(`${file.path}\n`);
 }
 
 function requiredSandboxId(value: string | undefined, label: string): `sbx_${string}` {
-  return requiredArg(value, label) as `sbx_${string}`;
-}
-
-function optionValue(
-  args: readonly (string | undefined)[],
-  flag: string,
-): string | undefined {
-  const index = args.indexOf(flag);
-  if (index < 0) {
-    return undefined;
-  }
-
-  return args[index + 1];
-}
-
-function requiredArg(value: string | undefined, label: string): string {
-  if (!value) {
-    throw new Error(`${label} is required.`);
-  }
-
-  return value;
+  return requiredPrefixedArg(value, label, "sbx_") as `sbx_${string}`;
 }
 
 function ok(stdout: string): CliResult {

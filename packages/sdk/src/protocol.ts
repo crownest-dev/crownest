@@ -197,12 +197,14 @@ export async function cancelCommand(
   transport: Transport,
   commandId: `cmd_${string}`,
   input: { readonly mode?: "force" | "graceful" },
-  path = `/v1/commands/${commandId}/cancel`,
 ): Promise<Command> {
-  const response = await transport.request<CancelCommandResponse>(path, {
-    body: input,
-    method: "POST",
-  });
+  const response = await transport.request<CancelCommandResponse>(
+    `/v1/commands/${commandId}/cancel`,
+    {
+      body: input,
+      method: "POST",
+    },
+  );
 
   return response.command;
 }

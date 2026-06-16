@@ -18,7 +18,7 @@ describe("keys create", () => {
     expect(result).toEqual({
       exitCode: 0,
       stderr: "",
-      stdout: "cn_live_created\n",
+      stdout: "secret: cn_live_created\n",
     });
     const body = requestBody(fetchMock);
     expect(body.name).toBe("Quickstart Developer");
@@ -42,6 +42,27 @@ describe("keys create", () => {
     expect(requestBody(fetchMock)).toMatchObject({
       scopes: ["code:run"],
     });
+  });
+
+  it("renders structured API errors", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "quota_exceeded",
+            details: { limit: 3 },
+            message: "API key quota exceeded.",
+          },
+        }),
+        { headers: { "content-type": "application/json" }, status: 403 },
+      ),
+    );
+    const result = await runCli(["keys", "create"], humanEnvironment(), fetchMock);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("error[quota_exceeded]: API key quota exceeded.");
+    expect(result.stderr).toContain("status: 403");
+    expect(result.stderr).toContain('"limit": 3');
   });
 });
 

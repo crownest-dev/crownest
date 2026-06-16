@@ -88,6 +88,8 @@ export const ApiKeyScopes = [
   "backup:delete",
   "usage:read",
   "api_key:read",
+  "api_key:revoke",
+  "project:create",
 ] as const;
 
 export type ApiKeyScope = (typeof ApiKeyScopes)[number];

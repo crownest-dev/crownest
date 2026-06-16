@@ -2,15 +2,30 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it, vi } from "vitest";
 
-import { OmittedArgumentsTransport } from "../transport";
+import {
+  OmittedArgumentsTransport,
+  toolsAcceptingOmittedArguments,
+} from "../transport";
+
+const omittedArgumentToolNames = [
+  "create_sandbox",
+  "list_files",
+  "list_sandboxes",
+  "get_usage",
+  "get_sandbox",
+  "list_artifacts",
+  "list_previews",
+  "list_code_contexts",
+  "list_api_keys",
+];
 
 describe("OmittedArgumentsTransport", () => {
   it("adds empty arguments for zero-argument-capable tools", () => {
-    const createSandbox = receiveThroughWrapper(toolCall("create_sandbox"));
-    const listFiles = receiveThroughWrapper(toolCall("list_files"));
+    expect([...toolsAcceptingOmittedArguments]).toEqual(omittedArgumentToolNames);
 
-    expect(getArguments(createSandbox)).toEqual({});
-    expect(getArguments(listFiles)).toEqual({});
+    for (const toolName of omittedArgumentToolNames) {
+      expect(getArguments(receiveThroughWrapper(toolCall(toolName)))).toEqual({});
+    }
   });
 
   it("preserves explicit arguments and tools that require arguments", () => {

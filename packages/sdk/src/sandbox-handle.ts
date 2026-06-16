@@ -15,8 +15,10 @@ import type {
   FileEncoding,
   FileEntry,
   FileStat,
+  GetCodeContextResponse,
   GetSandboxResponse,
   ListArtifactsResponse,
+  ListCodeContextsResponse,
   ListFilesResponse,
   ListPreviewsResponse,
   Preview,
@@ -32,40 +34,59 @@ import { cancelCommand, type RunCommandOptions, type Transport } from "./protoco
 
 export type SandboxHandle = Sandbox & {
   readonly artifacts: {
+    /** Export a Workspace file in this Sandbox as a durable Artifact. */
     create(input: {
       readonly idempotencyKey?: string;
       readonly name?: string;
       readonly path: string;
     }): Promise<Artifact>;
+    /** List Artifacts exported from this Sandbox. */
     list(): Promise<readonly Artifact[]>;
   };
   readonly code: {
+    /** Create a Code Context in this Sandbox. */
     createContext(input?: CreateCodeContextInput): Promise<CodeContextRef>;
+    /** Delete a Code Context in this Sandbox. */
     deleteContext(contextId: `cctx_${string}`): Promise<CodeContextRef>;
+    /** Retrieve Code Context metadata in this Sandbox. */
+    getContext(contextId: `cctx_${string}`): Promise<CodeContextRef>;
+    /** List Code Contexts in this Sandbox. */
+    listContexts(): Promise<readonly CodeContextRef[]>;
+    /** Run interpreter code in this Sandbox. */
     run(input: RunCodeInput): Promise<RunCodeResult>;
+    /** Stream interpreter code execution events from this Sandbox. */
     runStream(input: RunCodeInput): AsyncIterable<CodeRunEvent>;
   };
   readonly commands: {
+    /** Cancel a Command in this Sandbox. */
     cancel(
       commandId: `cmd_${string}`,
       input?: { readonly mode?: "force" | "graceful" },
     ): Promise<Command>;
+    /** Run a Command in this Sandbox and wait for completion. */
     run(command: string, input?: RunCommandOptions): Promise<Command>;
+    /** Start a Command in this Sandbox without waiting for completion. */
     start(
       command: string,
       input?: Omit<RunCommandOptions, "collect" | "collectOn">,
     ): Promise<Command>;
   };
   readonly files: {
+    /** Delete a Workspace file or empty directory in this Sandbox. */
     delete(path: string): Promise<void>;
+    /** Create or reuse a short-lived download URL for a Workspace file. */
     downloadUrl(path: string): Promise<FileDownloadUrlResponse>;
+    /** List entries in a Workspace directory. */
     list(path?: string): Promise<readonly FileEntry[]>;
+    /** Create a Workspace directory in this Sandbox. */
     mkdir(path: string, input?: { readonly parents?: boolean }): Promise<FileStat>;
+    /** Move or rename a Workspace file or directory. */
     move(
       from: string,
       to: string,
       input?: { readonly overwrite?: boolean },
     ): Promise<FileStat>;
+    /** Read a small Workspace file as text. */
     read(path: string, input?: { readonly encoding?: FileEncoding }): Promise<string>;
     /**
      * Reads a small file as bytes through the direct base64 API. Direct payloads
@@ -73,7 +94,9 @@ export type SandboxHandle = Sandbox & {
      * artifacts for larger files.
      */
     readBytes(path: string): Promise<Uint8Array>;
+    /** Inspect Workspace file metadata. */
     stat(path: string): Promise<FileStat>;
+    /** Write a small Workspace text file. */
     write(
       path: string,
       content: string,
@@ -98,16 +121,20 @@ export type SandboxHandle = Sandbox & {
     ): Promise<FileStat>;
   };
   readonly previews: {
+    /** Create a Preview for a port in this Sandbox. */
     create(input: {
       readonly authMode?: PreviewAuthMode;
       readonly port: number;
     }): Promise<CreatePreviewResponse>;
+    /** List Previews for this Sandbox. */
     list(): Promise<readonly Preview[]>;
   };
+  /** Reset this live Sandbox TTL from now. */
   extend(input: {
     readonly idempotencyKey?: string;
     readonly ttlMs: number;
   }): Promise<SandboxHandle>;
+  /** Kill this Sandbox. */
   kill(): Promise<SandboxHandle>;
 };
 
@@ -239,6 +266,20 @@ export function createSandboxCodeClient(
       );
       return response.context;
     },
+    async getContext(contextId) {
+      const response = await transport.request<GetCodeContextResponse>(
+        `/v1/sandboxes/${sandboxId}/code/contexts/${contextId}`,
+        { method: "GET" },
+      );
+      return response.context;
+    },
+    async listContexts() {
+      const response = await transport.request<ListCodeContextsResponse>(
+        `/v1/sandboxes/${sandboxId}/code/contexts`,
+        { method: "GET" },
+      );
+      return response.data;
+    },
     async run(input) {
       const { idempotencyKey, ...body } = input;
       const response = await transport.request<RunCodeResponse>(
@@ -273,12 +314,7 @@ function createSandboxCommands(
 ): SandboxHandle["commands"] {
   return {
     cancel(commandId, input = {}) {
-      return cancelCommand(
-        transport,
-        commandId,
-        input,
-        `/v1/sandboxes/${sandbox.id}/commands/${commandId}/cancel`,
-      );
+      return cancelCommand(transport, commandId, input);
     },
     run(command, input = {}) {
       return runCommandWithCallbacks(transport, sandbox.id, command, "run", input);

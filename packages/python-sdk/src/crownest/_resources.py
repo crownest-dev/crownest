@@ -48,6 +48,7 @@ class CrowNest:
             http_client=http_client,
             timeout=timeout,
         )
+        self.api_keys = ApiKeysClient(self._transport)
         self.artifacts = ArtifactsClient(self._transport)
         self.code = CodeClient(self._transport)
         self.commands = CommandsClient(self._transport)
@@ -57,9 +58,11 @@ class CrowNest:
         self.sandboxes = SandboxesClient(self._transport)
 
     def usage(self) -> JsonObject:
+        """Return current compute usage, credits, and quota buckets."""
         return self._transport.request("/v1/usage", method="GET")
 
     def close(self) -> None:
+        """Close the underlying HTTP client owned by this CrowNest client."""
         self._transport.close()
 
     def __enter__(self) -> "CrowNest":
@@ -86,6 +89,7 @@ class AsyncCrowNest:
             http_client=http_client,
             timeout=timeout,
         )
+        self.api_keys = AsyncApiKeysClient(self._transport)
         self.artifacts = AsyncArtifactsClient(self._transport)
         self.code = AsyncCodeClient(self._transport)
         self.commands = AsyncCommandsClient(self._transport)
@@ -95,9 +99,11 @@ class AsyncCrowNest:
         self.sandboxes = AsyncSandboxesClient(self._transport)
 
     async def usage(self) -> JsonObject:
+        """Return current compute usage, credits, and quota buckets."""
         return await self._transport.request("/v1/usage", method="GET")
 
     async def aclose(self) -> None:
+        """Close the underlying async HTTP client owned by this CrowNest client."""
         await self._transport.aclose()
 
     async def __aenter__(self) -> "AsyncCrowNest":
@@ -120,9 +126,11 @@ class SandboxHandle(Mapping[str, Json]):
 
     @property
     def id(self) -> str:
+        """Return this Sandbox id."""
         return str(self._data["id"])
 
     def kill(self) -> "SandboxHandle":
+        """Kill this Sandbox and return updated Sandbox metadata."""
         response = self._transport.request(
             f"/v1/sandboxes/{self.id}",
             method="DELETE",
@@ -135,6 +143,7 @@ class SandboxHandle(Mapping[str, Json]):
         ttl_ms: int,
         idempotency_key: str | None = None,
     ) -> "SandboxHandle":
+        """Reset this live Sandbox TTL from now and return updated metadata."""
         response = self._transport.request(
             f"/v1/sandboxes/{self.id}/extend",
             method="POST",
@@ -145,6 +154,7 @@ class SandboxHandle(Mapping[str, Json]):
         return SandboxHandle(response["sandbox"], self._transport)
 
     def to_dict(self) -> JsonObject:
+        """Return this SandboxHandle's raw Sandbox metadata as a dict."""
         return dict(self._data)
 
     def __getitem__(self, key: str) -> Json:
@@ -176,9 +186,11 @@ class AsyncSandboxHandle(Mapping[str, Json]):
 
     @property
     def id(self) -> str:
+        """Return this Sandbox id."""
         return str(self._data["id"])
 
     async def kill(self) -> "AsyncSandboxHandle":
+        """Kill this Sandbox and return updated Sandbox metadata."""
         response = await self._transport.request(
             f"/v1/sandboxes/{self.id}",
             method="DELETE",
@@ -191,6 +203,7 @@ class AsyncSandboxHandle(Mapping[str, Json]):
         ttl_ms: int,
         idempotency_key: str | None = None,
     ) -> "AsyncSandboxHandle":
+        """Reset this live Sandbox TTL from now and return updated metadata."""
         response = await self._transport.request(
             f"/v1/sandboxes/{self.id}/extend",
             method="POST",
@@ -201,6 +214,7 @@ class AsyncSandboxHandle(Mapping[str, Json]):
         return AsyncSandboxHandle(response["sandbox"], self._transport)
 
     def to_dict(self) -> JsonObject:
+        """Return this SandboxHandle's raw Sandbox metadata as a dict."""
         return dict(self._data)
 
     def __getitem__(self, key: str) -> Json:
@@ -232,6 +246,7 @@ class CodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> JsonObject:
+        """Create a Code Context in a Sandbox and return its metadata."""
         return _create_code_context(
             self._transport,
             sandbox_id,
@@ -242,7 +257,16 @@ class CodeClient:
         )
 
     def delete_context(self, sandbox_id: str, context_id: str) -> JsonObject:
+        """Delete a Code Context from a Sandbox and return its metadata."""
         return _delete_code_context(self._transport, sandbox_id, context_id)
+
+    def get_context(self, sandbox_id: str, context_id: str) -> JsonObject:
+        """Return Code Context metadata for a Sandbox."""
+        return _get_code_context(self._transport, sandbox_id, context_id)
+
+    def list_contexts(self, sandbox_id: str) -> list[JsonObject]:
+        """List Code Context metadata records for a Sandbox."""
+        return _list_code_contexts(self._transport, sandbox_id)
 
     def run(
         self,
@@ -256,6 +280,7 @@ class CodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> JsonObject:
+        """Run interpreter code in a Sandbox and return the Code Run result."""
         return _run_code(
             self._transport,
             sandbox_id,
@@ -280,6 +305,7 @@ class CodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> Iterator[JsonObject]:
+        """Stream interpreter code execution events from a Sandbox."""
         yield from _run_code_stream(
             self._transport,
             sandbox_id,
@@ -306,6 +332,7 @@ class AsyncCodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> JsonObject:
+        """Create a Code Context in a Sandbox and return its metadata."""
         return await _async_create_code_context(
             self._transport,
             sandbox_id,
@@ -316,7 +343,16 @@ class AsyncCodeClient:
         )
 
     async def delete_context(self, sandbox_id: str, context_id: str) -> JsonObject:
+        """Delete a Code Context from a Sandbox and return its metadata."""
         return await _async_delete_code_context(self._transport, sandbox_id, context_id)
+
+    async def get_context(self, sandbox_id: str, context_id: str) -> JsonObject:
+        """Return Code Context metadata for a Sandbox."""
+        return await _async_get_code_context(self._transport, sandbox_id, context_id)
+
+    async def list_contexts(self, sandbox_id: str) -> list[JsonObject]:
+        """List Code Context metadata records for a Sandbox."""
+        return await _async_list_code_contexts(self._transport, sandbox_id)
 
     async def run(
         self,
@@ -330,6 +366,7 @@ class AsyncCodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> JsonObject:
+        """Run interpreter code in a Sandbox and return the Code Run result."""
         return await _async_run_code(
             self._transport,
             sandbox_id,
@@ -354,6 +391,7 @@ class AsyncCodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> AsyncIterator[JsonObject]:
+        """Stream interpreter code execution events from a Sandbox."""
         async for event in _async_run_code_stream(
             self._transport,
             sandbox_id,
@@ -383,6 +421,7 @@ class SandboxesClient:
         template_version_id: str | None = None,
         ttl_ms: int | None = None,
     ) -> SandboxHandle:
+        """Create a live Sandbox and return a scoped SandboxHandle."""
         response = self._transport.request(
             "/v1/sandboxes",
             method="POST",
@@ -400,6 +439,7 @@ class SandboxesClient:
         return SandboxHandle(response["sandbox"], self._transport)
 
     def get(self, sandbox_id: str) -> SandboxHandle:
+        """Return a SandboxHandle for a Sandbox id."""
         response = self._transport.request(f"/v1/sandboxes/{sandbox_id}", method="GET")
         return SandboxHandle(response["sandbox"], self._transport)
 
@@ -410,6 +450,7 @@ class SandboxesClient:
         ttl_ms: int,
         idempotency_key: str | None = None,
     ) -> SandboxHandle:
+        """Reset a live Sandbox TTL from now and return a SandboxHandle."""
         response = self._transport.request(
             f"/v1/sandboxes/{sandbox_id}/extend",
             method="POST",
@@ -420,6 +461,7 @@ class SandboxesClient:
         return SandboxHandle(response["sandbox"], self._transport)
 
     def kill(self, sandbox_id: str) -> JsonObject:
+        """Kill a live Sandbox and return destroyed Sandbox metadata."""
         response = self._transport.request(
             f"/v1/sandboxes/{sandbox_id}",
             method="DELETE",
@@ -427,6 +469,7 @@ class SandboxesClient:
         return response["sandbox"]
 
     def list(self, *, metadata: Metadata | None = None) -> list[JsonObject]:
+        """List live Sandboxes visible to the configured credential."""
         response = self._transport.request(
             f"/v1/sandboxes{_sandbox_list_query(metadata)}",
             method="GET",
@@ -449,6 +492,7 @@ class AsyncSandboxesClient:
         template_version_id: str | None = None,
         ttl_ms: int | None = None,
     ) -> AsyncSandboxHandle:
+        """Create a live Sandbox and return a scoped SandboxHandle."""
         response = await self._transport.request(
             "/v1/sandboxes",
             method="POST",
@@ -466,6 +510,7 @@ class AsyncSandboxesClient:
         return AsyncSandboxHandle(response["sandbox"], self._transport)
 
     async def get(self, sandbox_id: str) -> AsyncSandboxHandle:
+        """Return a SandboxHandle for a Sandbox id."""
         response = await self._transport.request(
             f"/v1/sandboxes/{sandbox_id}",
             method="GET",
@@ -479,6 +524,7 @@ class AsyncSandboxesClient:
         ttl_ms: int,
         idempotency_key: str | None = None,
     ) -> AsyncSandboxHandle:
+        """Reset a live Sandbox TTL from now and return a SandboxHandle."""
         response = await self._transport.request(
             f"/v1/sandboxes/{sandbox_id}/extend",
             method="POST",
@@ -489,6 +535,7 @@ class AsyncSandboxesClient:
         return AsyncSandboxHandle(response["sandbox"], self._transport)
 
     async def kill(self, sandbox_id: str) -> JsonObject:
+        """Kill a live Sandbox and return destroyed Sandbox metadata."""
         response = await self._transport.request(
             f"/v1/sandboxes/{sandbox_id}",
             method="DELETE",
@@ -496,6 +543,7 @@ class AsyncSandboxesClient:
         return response["sandbox"]
 
     async def list(self, *, metadata: Metadata | None = None) -> list[JsonObject]:
+        """List live Sandboxes visible to the configured credential."""
         response = await self._transport.request(
             f"/v1/sandboxes{_sandbox_list_query(metadata)}",
             method="GET",
@@ -508,6 +556,7 @@ class CommandsClient:
         self._transport = transport
 
     def get(self, command_id: str) -> JsonObject:
+        """Return Command metadata for a Command id."""
         response = self._transport.request(f"/v1/commands/{command_id}", method="GET")
         return response["command"]
 
@@ -517,6 +566,7 @@ class CommandsClient:
         *,
         mode: CommandCancelMode | None = None,
     ) -> JsonObject:
+        """Cancel a Command by id and return updated Command metadata."""
         return _cancel_command(self._transport, command_id, mode=mode)
 
     def logs(
@@ -526,6 +576,7 @@ class CommandsClient:
         after_seq: int | None = None,
         limit: int | None = None,
     ) -> list[JsonObject]:
+        """Read bounded Command log chunks for a Command id."""
         response = self._transport.request(
             f"/v1/commands/{command_id}/logs{_command_log_query(after_seq, limit)}",
             method="GET",
@@ -538,6 +589,7 @@ class CommandsClient:
         command: str,
         **options: Any,
     ) -> JsonObject:
+        """Run a Command in a Sandbox and return completed Command metadata."""
         return _run_command(self._transport, sandbox_id, command, "run", **options)
 
     def start(
@@ -546,6 +598,7 @@ class CommandsClient:
         command: str,
         **options: Any,
     ) -> JsonObject:
+        """Start a Command in a Sandbox and return started Command metadata."""
         return _run_command(self._transport, sandbox_id, command, "start", **options)
 
     def stream_logs(
@@ -555,6 +608,7 @@ class CommandsClient:
         after_seq: int | None = None,
         reconnect: bool = True,
     ) -> Iterator[JsonObject]:
+        """Stream Command log events for a Command id."""
         yield from _stream_logs(
             self._transport,
             command_id,
@@ -568,6 +622,7 @@ class AsyncCommandsClient:
         self._transport = transport
 
     async def get(self, command_id: str) -> JsonObject:
+        """Return Command metadata for a Command id."""
         response = await self._transport.request(
             f"/v1/commands/{command_id}",
             method="GET",
@@ -580,6 +635,7 @@ class AsyncCommandsClient:
         *,
         mode: CommandCancelMode | None = None,
     ) -> JsonObject:
+        """Cancel a Command by id and return updated Command metadata."""
         return await _async_cancel_command(self._transport, command_id, mode=mode)
 
     async def logs(
@@ -589,6 +645,7 @@ class AsyncCommandsClient:
         after_seq: int | None = None,
         limit: int | None = None,
     ) -> list[JsonObject]:
+        """Read bounded Command log chunks for a Command id."""
         response = await self._transport.request(
             f"/v1/commands/{command_id}/logs{_command_log_query(after_seq, limit)}",
             method="GET",
@@ -601,6 +658,7 @@ class AsyncCommandsClient:
         command: str,
         **options: Any,
     ) -> JsonObject:
+        """Run a Command in a Sandbox and return completed Command metadata."""
         return await _async_run_command(
             self._transport,
             sandbox_id,
@@ -615,6 +673,7 @@ class AsyncCommandsClient:
         command: str,
         **options: Any,
     ) -> JsonObject:
+        """Start a Command in a Sandbox and return started Command metadata."""
         return await _async_run_command(
             self._transport,
             sandbox_id,
@@ -630,6 +689,7 @@ class AsyncCommandsClient:
         after_seq: int | None = None,
         reconnect: bool = True,
     ) -> AsyncIterator[JsonObject]:
+        """Stream Command log events for a Command id."""
         async for event in _async_stream_logs(
             self._transport,
             command_id,
@@ -644,12 +704,15 @@ class FilesClient:
         self._transport = transport
 
     def delete(self, sandbox_id: str, path: str) -> None:
+        """Delete a Workspace file or empty directory in a Sandbox."""
         _delete_file(self._transport, sandbox_id, path)
 
     def download_url(self, sandbox_id: str, path: str) -> JsonObject:
+        """Create or reuse a short-lived download URL for a Workspace file."""
         return _file_download_url(self._transport, sandbox_id, path)
 
     def list(self, sandbox_id: str, path: str = "/workspace") -> list[JsonObject]:
+        """List files and directories under a Sandbox Workspace path."""
         return _list_files(self._transport, sandbox_id, path)
 
     def mkdir(
@@ -659,6 +722,7 @@ class FilesClient:
         *,
         parents: bool | None = None,
     ) -> JsonObject:
+        """Create a Workspace directory in a Sandbox and return metadata."""
         return _mkdir(self._transport, sandbox_id, path, parents=parents)
 
     def move(
@@ -669,6 +733,7 @@ class FilesClient:
         *,
         overwrite: bool | None = None,
     ) -> JsonObject:
+        """Move or rename a Workspace path in a Sandbox and return metadata."""
         return _move_file(
             self._transport,
             sandbox_id,
@@ -684,6 +749,7 @@ class FilesClient:
         *,
         encoding: FileEncoding | None = None,
     ) -> str:
+        """Read a small Workspace file as text."""
         return _read_file(self._transport, sandbox_id, path, encoding=encoding)
 
     def read_bytes(self, sandbox_id: str, path: str) -> bytes:
@@ -691,6 +757,7 @@ class FilesClient:
         return _read_file_bytes(self._transport, sandbox_id, path)
 
     def stat(self, sandbox_id: str, path: str) -> JsonObject:
+        """Return Workspace file metadata for a Sandbox path."""
         return _stat_file(self._transport, sandbox_id, path)
 
     def write(
@@ -703,6 +770,7 @@ class FilesClient:
         encoding: FileEncoding | None = None,
         overwrite: bool | None = None,
     ) -> JsonObject:
+        """Write a small Workspace text file and return file metadata."""
         return _write_file(
             self._transport,
             sandbox_id,
@@ -738,9 +806,11 @@ class AsyncFilesClient:
         self._transport = transport
 
     async def delete(self, sandbox_id: str, path: str) -> None:
+        """Delete a Workspace file or empty directory in a Sandbox."""
         await _async_delete_file(self._transport, sandbox_id, path)
 
     async def download_url(self, sandbox_id: str, path: str) -> JsonObject:
+        """Create or reuse a short-lived download URL for a Workspace file."""
         return await _async_file_download_url(self._transport, sandbox_id, path)
 
     async def list(
@@ -748,6 +818,7 @@ class AsyncFilesClient:
         sandbox_id: str,
         path: str = "/workspace",
     ) -> list[JsonObject]:
+        """List files and directories under a Sandbox Workspace path."""
         return await _async_list_files(self._transport, sandbox_id, path)
 
     async def mkdir(
@@ -757,6 +828,7 @@ class AsyncFilesClient:
         *,
         parents: bool | None = None,
     ) -> JsonObject:
+        """Create a Workspace directory in a Sandbox and return metadata."""
         return await _async_mkdir(self._transport, sandbox_id, path, parents=parents)
 
     async def move(
@@ -767,6 +839,7 @@ class AsyncFilesClient:
         *,
         overwrite: bool | None = None,
     ) -> JsonObject:
+        """Move or rename a Workspace path in a Sandbox and return metadata."""
         return await _async_move_file(
             self._transport,
             sandbox_id,
@@ -782,6 +855,7 @@ class AsyncFilesClient:
         *,
         encoding: FileEncoding | None = None,
     ) -> str:
+        """Read a small Workspace file as text."""
         return await _async_read_file(self._transport, sandbox_id, path, encoding=encoding)
 
     async def read_bytes(self, sandbox_id: str, path: str) -> bytes:
@@ -789,6 +863,7 @@ class AsyncFilesClient:
         return await _async_read_file_bytes(self._transport, sandbox_id, path)
 
     async def stat(self, sandbox_id: str, path: str) -> JsonObject:
+        """Return Workspace file metadata for a Sandbox path."""
         return await _async_stat_file(self._transport, sandbox_id, path)
 
     async def write(
@@ -801,6 +876,7 @@ class AsyncFilesClient:
         encoding: FileEncoding | None = None,
         overwrite: bool | None = None,
     ) -> JsonObject:
+        """Write a small Workspace text file and return file metadata."""
         return await _async_write_file(
             self._transport,
             sandbox_id,
@@ -820,7 +896,7 @@ class AsyncFilesClient:
         create_parents: bool | None = None,
         overwrite: bool | None = None,
     ) -> JsonObject:
-        """Write a small file as bytes via the API's direct base64 file limit."""
+        """Write a small Workspace bytes file via the direct base64 API."""
         return await _async_write_file_bytes(
             self._transport,
             sandbox_id,
@@ -837,15 +913,19 @@ class SandboxFilesClient:
         self._transport = transport
 
     def delete(self, path: str) -> None:
+        """Delete a Workspace file or empty directory in this Sandbox."""
         _delete_file(self._transport, self._sandbox_id, path)
 
     def download_url(self, path: str) -> JsonObject:
+        """Create or reuse a short-lived download URL for a file in this Sandbox."""
         return _file_download_url(self._transport, self._sandbox_id, path)
 
     def list(self, path: str = "/workspace") -> list[JsonObject]:
+        """List files and directories under a Workspace path in this Sandbox."""
         return _list_files(self._transport, self._sandbox_id, path)
 
     def mkdir(self, path: str, *, parents: bool | None = None) -> JsonObject:
+        """Create a Workspace directory in this Sandbox and return metadata."""
         return _mkdir(self._transport, self._sandbox_id, path, parents=parents)
 
     def move(
@@ -855,6 +935,7 @@ class SandboxFilesClient:
         *,
         overwrite: bool | None = None,
     ) -> JsonObject:
+        """Move or rename a Workspace path in this Sandbox and return metadata."""
         return _move_file(
             self._transport,
             self._sandbox_id,
@@ -864,13 +945,15 @@ class SandboxFilesClient:
         )
 
     def read(self, path: str, *, encoding: FileEncoding | None = None) -> str:
+        """Read a small Workspace file in this Sandbox as text."""
         return _read_file(self._transport, self._sandbox_id, path, encoding=encoding)
 
     def read_bytes(self, path: str) -> bytes:
-        """Read a small file as bytes via the API's direct base64 file limit."""
+        """Read a small Workspace file in this Sandbox as bytes."""
         return _read_file_bytes(self._transport, self._sandbox_id, path)
 
     def stat(self, path: str) -> JsonObject:
+        """Return Workspace file metadata for a path in this Sandbox."""
         return _stat_file(self._transport, self._sandbox_id, path)
 
     def write(
@@ -882,6 +965,7 @@ class SandboxFilesClient:
         encoding: FileEncoding | None = None,
         overwrite: bool | None = None,
     ) -> JsonObject:
+        """Write a small Workspace text file in this Sandbox."""
         return _write_file(
             self._transport,
             self._sandbox_id,
@@ -900,7 +984,7 @@ class SandboxFilesClient:
         create_parents: bool | None = None,
         overwrite: bool | None = None,
     ) -> JsonObject:
-        """Write a small file as bytes via the API's direct base64 file limit."""
+        """Write a small Workspace bytes file in this Sandbox."""
         return _write_file_bytes(
             self._transport,
             self._sandbox_id,
@@ -917,15 +1001,19 @@ class AsyncSandboxFilesClient:
         self._transport = transport
 
     async def delete(self, path: str) -> None:
+        """Delete a Workspace file or empty directory in this Sandbox."""
         await _async_delete_file(self._transport, self._sandbox_id, path)
 
     async def download_url(self, path: str) -> JsonObject:
+        """Create or reuse a short-lived download URL for a file in this Sandbox."""
         return await _async_file_download_url(self._transport, self._sandbox_id, path)
 
     async def list(self, path: str = "/workspace") -> list[JsonObject]:
+        """List files and directories under a Workspace path in this Sandbox."""
         return await _async_list_files(self._transport, self._sandbox_id, path)
 
     async def mkdir(self, path: str, *, parents: bool | None = None) -> JsonObject:
+        """Create a Workspace directory in this Sandbox and return metadata."""
         return await _async_mkdir(
             self._transport,
             self._sandbox_id,
@@ -940,6 +1028,7 @@ class AsyncSandboxFilesClient:
         *,
         overwrite: bool | None = None,
     ) -> JsonObject:
+        """Move or rename a Workspace path in this Sandbox and return metadata."""
         return await _async_move_file(
             self._transport,
             self._sandbox_id,
@@ -949,6 +1038,7 @@ class AsyncSandboxFilesClient:
         )
 
     async def read(self, path: str, *, encoding: FileEncoding | None = None) -> str:
+        """Read a small Workspace file in this Sandbox as text."""
         return await _async_read_file(
             self._transport,
             self._sandbox_id,
@@ -957,10 +1047,11 @@ class AsyncSandboxFilesClient:
         )
 
     async def read_bytes(self, path: str) -> bytes:
-        """Read a small file as bytes via the API's direct base64 file limit."""
+        """Read a small Workspace file in this Sandbox as bytes."""
         return await _async_read_file_bytes(self._transport, self._sandbox_id, path)
 
     async def stat(self, path: str) -> JsonObject:
+        """Return Workspace file metadata for a path in this Sandbox."""
         return await _async_stat_file(self._transport, self._sandbox_id, path)
 
     async def write(
@@ -972,6 +1063,7 @@ class AsyncSandboxFilesClient:
         encoding: FileEncoding | None = None,
         overwrite: bool | None = None,
     ) -> JsonObject:
+        """Write a small Workspace text file in this Sandbox."""
         return await _async_write_file(
             self._transport,
             self._sandbox_id,
@@ -990,7 +1082,7 @@ class AsyncSandboxFilesClient:
         create_parents: bool | None = None,
         overwrite: bool | None = None,
     ) -> JsonObject:
-        """Write a small file as bytes via the API's direct base64 file limit."""
+        """Write a small Workspace bytes file in this Sandbox."""
         return await _async_write_file_bytes(
             self._transport,
             self._sandbox_id,
@@ -1013,6 +1105,7 @@ class ArtifactsClient:
         idempotency_key: str | None = None,
         name: str | None = None,
     ) -> JsonObject:
+        """Export a Sandbox Workspace file as an Artifact and return metadata."""
         return _create_artifact(
             self._transport,
             sandbox_id,
@@ -1022,6 +1115,7 @@ class ArtifactsClient:
         )
 
     def delete(self, artifact_id: str) -> JsonObject:
+        """Delete an Artifact by id and return deleted metadata."""
         response = self._transport.request(
             f"/v1/artifacts/{artifact_id}",
             method="DELETE",
@@ -1029,15 +1123,18 @@ class ArtifactsClient:
         return response["artifact"]
 
     def download(self, artifact_id: str) -> bytes:
+        """Download raw Artifact bytes by id."""
         return self._transport.download(f"/v1/artifacts/{artifact_id}/download")
 
     def download_url(self, artifact_id: str) -> JsonObject:
+        """Create or reuse a short-lived Artifact download URL."""
         return self._transport.request(
             f"/v1/artifacts/{artifact_id}/download-url",
             method="POST",
         )
 
     def get(self, artifact_id: str) -> JsonObject:
+        """Return Artifact metadata by id."""
         response = self._transport.request(
             f"/v1/artifacts/{artifact_id}",
             method="GET",
@@ -1045,6 +1142,7 @@ class ArtifactsClient:
         return response["artifact"]
 
     def list(self, sandbox_id: str) -> list[JsonObject]:
+        """List Artifact metadata records for a Sandbox."""
         return _list_artifacts(self._transport, sandbox_id)
 
 
@@ -1060,6 +1158,7 @@ class AsyncArtifactsClient:
         idempotency_key: str | None = None,
         name: str | None = None,
     ) -> JsonObject:
+        """Export a Sandbox Workspace file as an Artifact and return metadata."""
         return await _async_create_artifact(
             self._transport,
             sandbox_id,
@@ -1069,6 +1168,7 @@ class AsyncArtifactsClient:
         )
 
     async def delete(self, artifact_id: str) -> JsonObject:
+        """Delete an Artifact by id and return deleted metadata."""
         response = await self._transport.request(
             f"/v1/artifacts/{artifact_id}",
             method="DELETE",
@@ -1076,15 +1176,18 @@ class AsyncArtifactsClient:
         return response["artifact"]
 
     async def download(self, artifact_id: str) -> bytes:
+        """Download raw Artifact bytes by id."""
         return await self._transport.download(f"/v1/artifacts/{artifact_id}/download")
 
     async def download_url(self, artifact_id: str) -> JsonObject:
+        """Create or reuse a short-lived Artifact download URL."""
         return await self._transport.request(
             f"/v1/artifacts/{artifact_id}/download-url",
             method="POST",
         )
 
     async def get(self, artifact_id: str) -> JsonObject:
+        """Return Artifact metadata by id."""
         response = await self._transport.request(
             f"/v1/artifacts/{artifact_id}",
             method="GET",
@@ -1092,6 +1195,7 @@ class AsyncArtifactsClient:
         return response["artifact"]
 
     async def list(self, sandbox_id: str) -> list[JsonObject]:
+        """List Artifact metadata records for a Sandbox."""
         return await _async_list_artifacts(self._transport, sandbox_id)
 
 
@@ -1107,6 +1211,7 @@ class SandboxArtifactsClient:
         idempotency_key: str | None = None,
         name: str | None = None,
     ) -> JsonObject:
+        """Export a Workspace file in this Sandbox as an Artifact."""
         return _create_artifact(
             self._transport,
             self._sandbox_id,
@@ -1116,6 +1221,7 @@ class SandboxArtifactsClient:
         )
 
     def list(self) -> list[JsonObject]:
+        """List Artifact metadata records for this Sandbox."""
         return _list_artifacts(self._transport, self._sandbox_id)
 
 
@@ -1131,6 +1237,7 @@ class AsyncSandboxArtifactsClient:
         idempotency_key: str | None = None,
         name: str | None = None,
     ) -> JsonObject:
+        """Export a Workspace file in this Sandbox as an Artifact."""
         return await _async_create_artifact(
             self._transport,
             self._sandbox_id,
@@ -1140,6 +1247,7 @@ class AsyncSandboxArtifactsClient:
         )
 
     async def list(self) -> list[JsonObject]:
+        """List Artifact metadata records for this Sandbox."""
         return await _async_list_artifacts(self._transport, self._sandbox_id)
 
 
@@ -1154,16 +1262,20 @@ class PreviewsClient:
         port: int,
         auth_mode: PreviewAuthMode | None = None,
     ) -> JsonObject:
+        """Create a Preview for a Sandbox port and return metadata."""
         return _create_preview(self._transport, sandbox_id, port, auth_mode=auth_mode)
 
     def get(self, preview_id: str) -> JsonObject:
+        """Return Preview metadata by id."""
         response = self._transport.request(f"/v1/previews/{preview_id}", method="GET")
         return response["preview"]
 
     def list(self, sandbox_id: str) -> list[JsonObject]:
+        """List Preview metadata records for a Sandbox."""
         return _list_previews(self._transport, sandbox_id)
 
     def revoke(self, preview_id: str) -> JsonObject:
+        """Revoke a Preview by id and return revoked metadata."""
         response = self._transport.request(
             f"/v1/previews/{preview_id}",
             method="DELETE",
@@ -1182,6 +1294,7 @@ class AsyncPreviewsClient:
         port: int,
         auth_mode: PreviewAuthMode | None = None,
     ) -> JsonObject:
+        """Create a Preview for a Sandbox port and return metadata."""
         return await _async_create_preview(
             self._transport,
             sandbox_id,
@@ -1190,6 +1303,7 @@ class AsyncPreviewsClient:
         )
 
     async def get(self, preview_id: str) -> JsonObject:
+        """Return Preview metadata by id."""
         response = await self._transport.request(
             f"/v1/previews/{preview_id}",
             method="GET",
@@ -1197,9 +1311,11 @@ class AsyncPreviewsClient:
         return response["preview"]
 
     async def list(self, sandbox_id: str) -> list[JsonObject]:
+        """List Preview metadata records for a Sandbox."""
         return await _async_list_previews(self._transport, sandbox_id)
 
     async def revoke(self, preview_id: str) -> JsonObject:
+        """Revoke a Preview by id and return revoked metadata."""
         response = await self._transport.request(
             f"/v1/previews/{preview_id}",
             method="DELETE",
@@ -1218,6 +1334,7 @@ class SandboxPreviewsClient:
         port: int,
         auth_mode: PreviewAuthMode | None = None,
     ) -> JsonObject:
+        """Create a Preview for a port in this Sandbox."""
         return _create_preview(
             self._transport,
             self._sandbox_id,
@@ -1226,6 +1343,7 @@ class SandboxPreviewsClient:
         )
 
     def list(self) -> list[JsonObject]:
+        """List Preview metadata records for this Sandbox."""
         return _list_previews(self._transport, self._sandbox_id)
 
 
@@ -1240,6 +1358,7 @@ class AsyncSandboxPreviewsClient:
         port: int,
         auth_mode: PreviewAuthMode | None = None,
     ) -> JsonObject:
+        """Create a Preview for a port in this Sandbox."""
         return await _async_create_preview(
             self._transport,
             self._sandbox_id,
@@ -1248,6 +1367,7 @@ class AsyncSandboxPreviewsClient:
         )
 
     async def list(self) -> list[JsonObject]:
+        """List Preview metadata records for this Sandbox."""
         return await _async_list_previews(self._transport, self._sandbox_id)
 
 
@@ -1255,7 +1375,17 @@ class ProjectsClient:
     def __init__(self, transport: SyncTransport) -> None:
         self._transport = transport
 
+    def create(self, *, name: str) -> JsonObject:
+        """Create a Project and return Project metadata."""
+        response = self._transport.request(
+            "/v1/projects",
+            method="POST",
+            body={"name": name},
+        )
+        return response["project"]
+
     def list(self) -> list[JsonObject]:
+        """List Projects visible to the configured credential."""
         response = self._transport.request("/v1/projects", method="GET")
         return list(response["data"])
 
@@ -1264,9 +1394,71 @@ class AsyncProjectsClient:
     def __init__(self, transport: AsyncTransport) -> None:
         self._transport = transport
 
+    async def create(self, *, name: str) -> JsonObject:
+        """Create a Project and return Project metadata."""
+        response = await self._transport.request(
+            "/v1/projects",
+            method="POST",
+            body={"name": name},
+        )
+        return response["project"]
+
     async def list(self) -> list[JsonObject]:
+        """List Projects visible to the configured credential."""
         response = await self._transport.request("/v1/projects", method="GET")
         return list(response["data"])
+
+
+class ApiKeysClient:
+    def __init__(self, transport: SyncTransport) -> None:
+        self._transport = transport
+
+    def get(self, api_key_id: str) -> JsonObject:
+        """Return API Key metadata by id without secret key material."""
+        response = self._transport.request(
+            f"/v1/api-keys/{api_key_id}",
+            method="GET",
+        )
+        return response["apiKey"]
+
+    def list(self) -> list[JsonObject]:
+        """List API Key metadata visible to the configured credential."""
+        response = self._transport.request("/v1/api-keys", method="GET")
+        return list(response["data"])
+
+    def revoke(self, api_key_id: str) -> JsonObject:
+        """Revoke an API Key by id and return revoked metadata."""
+        response = self._transport.request(
+            f"/v1/api-keys/{api_key_id}",
+            method="DELETE",
+        )
+        return response["apiKey"]
+
+
+class AsyncApiKeysClient:
+    def __init__(self, transport: AsyncTransport) -> None:
+        self._transport = transport
+
+    async def get(self, api_key_id: str) -> JsonObject:
+        """Return API Key metadata by id without secret key material."""
+        response = await self._transport.request(
+            f"/v1/api-keys/{api_key_id}",
+            method="GET",
+        )
+        return response["apiKey"]
+
+    async def list(self) -> list[JsonObject]:
+        """List API Key metadata visible to the configured credential."""
+        response = await self._transport.request("/v1/api-keys", method="GET")
+        return list(response["data"])
+
+    async def revoke(self, api_key_id: str) -> JsonObject:
+        """Revoke an API Key by id and return revoked metadata."""
+        response = await self._transport.request(
+            f"/v1/api-keys/{api_key_id}",
+            method="DELETE",
+        )
+        return response["apiKey"]
 
 
 class SandboxCommandsClient:
@@ -1280,17 +1472,15 @@ class SandboxCommandsClient:
         *,
         mode: CommandCancelMode | None = None,
     ) -> JsonObject:
-        return _cancel_command(
-            self._transport,
-            command_id,
-            mode=mode,
-            path=f"/v1/sandboxes/{self._sandbox_id}/commands/{command_id}/cancel",
-        )
+        """Cancel a Command in this Sandbox and return updated metadata."""
+        return _cancel_command(self._transport, command_id, mode=mode)
 
     def run(self, command: str, **options: Any) -> JsonObject:
+        """Run a Command in this Sandbox and return completed metadata."""
         return _run_command(self._transport, self._sandbox_id, command, "run", **options)
 
     def start(self, command: str, **options: Any) -> JsonObject:
+        """Start a Command in this Sandbox and return started metadata."""
         return _run_command(
             self._transport,
             self._sandbox_id,
@@ -1311,14 +1501,11 @@ class AsyncSandboxCommandsClient:
         *,
         mode: CommandCancelMode | None = None,
     ) -> JsonObject:
-        return await _async_cancel_command(
-            self._transport,
-            command_id,
-            mode=mode,
-            path=f"/v1/sandboxes/{self._sandbox_id}/commands/{command_id}/cancel",
-        )
+        """Cancel a Command in this Sandbox and return updated metadata."""
+        return await _async_cancel_command(self._transport, command_id, mode=mode)
 
     async def run(self, command: str, **options: Any) -> JsonObject:
+        """Run a Command in this Sandbox and return completed metadata."""
         return await _async_run_command(
             self._transport,
             self._sandbox_id,
@@ -1328,6 +1515,7 @@ class AsyncSandboxCommandsClient:
         )
 
     async def start(self, command: str, **options: Any) -> JsonObject:
+        """Start a Command in this Sandbox and return started metadata."""
         return await _async_run_command(
             self._transport,
             self._sandbox_id,
@@ -1350,6 +1538,7 @@ class SandboxCodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> JsonObject:
+        """Create a Code Context in this Sandbox and return metadata."""
         return _create_code_context(
             self._transport,
             self._sandbox_id,
@@ -1360,7 +1549,16 @@ class SandboxCodeClient:
         )
 
     def delete_context(self, context_id: str) -> JsonObject:
+        """Delete a Code Context in this Sandbox and return metadata."""
         return _delete_code_context(self._transport, self._sandbox_id, context_id)
+
+    def get_context(self, context_id: str) -> JsonObject:
+        """Return Code Context metadata in this Sandbox."""
+        return _get_code_context(self._transport, self._sandbox_id, context_id)
+
+    def list_contexts(self) -> list[JsonObject]:
+        """List Code Context metadata records in this Sandbox."""
+        return _list_code_contexts(self._transport, self._sandbox_id)
 
     def run(
         self,
@@ -1373,6 +1571,7 @@ class SandboxCodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> JsonObject:
+        """Run interpreter code in this Sandbox and return the result."""
         return _run_code(
             self._transport,
             self._sandbox_id,
@@ -1396,6 +1595,7 @@ class SandboxCodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> Iterator[JsonObject]:
+        """Stream interpreter code execution events from this Sandbox."""
         yield from _run_code_stream(
             self._transport,
             self._sandbox_id,
@@ -1422,6 +1622,7 @@ class AsyncSandboxCodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> JsonObject:
+        """Create a Code Context in this Sandbox and return metadata."""
         return await _async_create_code_context(
             self._transport,
             self._sandbox_id,
@@ -1432,11 +1633,24 @@ class AsyncSandboxCodeClient:
         )
 
     async def delete_context(self, context_id: str) -> JsonObject:
+        """Delete a Code Context in this Sandbox and return metadata."""
         return await _async_delete_code_context(
             self._transport,
             self._sandbox_id,
             context_id,
         )
+
+    async def get_context(self, context_id: str) -> JsonObject:
+        """Return Code Context metadata in this Sandbox."""
+        return await _async_get_code_context(
+            self._transport,
+            self._sandbox_id,
+            context_id,
+        )
+
+    async def list_contexts(self) -> list[JsonObject]:
+        """List Code Context metadata records in this Sandbox."""
+        return await _async_list_code_contexts(self._transport, self._sandbox_id)
 
     async def run(
         self,
@@ -1449,6 +1663,7 @@ class AsyncSandboxCodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> JsonObject:
+        """Run interpreter code in this Sandbox and return the result."""
         return await _async_run_code(
             self._transport,
             self._sandbox_id,
@@ -1472,6 +1687,7 @@ class AsyncSandboxCodeClient:
         language: CodeLanguage = "python",
         timeout_ms: int | None = None,
     ) -> AsyncIterator[JsonObject]:
+        """Stream interpreter code execution events from this Sandbox."""
         async for event in _async_run_code_stream(
             self._transport,
             self._sandbox_id,
@@ -1673,10 +1889,9 @@ def _cancel_command(
     command_id: str,
     *,
     mode: CommandCancelMode | None = None,
-    path: str | None = None,
 ) -> JsonObject:
     response = transport.request(
-        path or f"/v1/commands/{command_id}/cancel",
+        f"/v1/commands/{command_id}/cancel",
         method="POST",
         body=_compact({"mode": mode}),
     )
@@ -1688,10 +1903,9 @@ async def _async_cancel_command(
     command_id: str,
     *,
     mode: CommandCancelMode | None = None,
-    path: str | None = None,
 ) -> JsonObject:
     response = await transport.request(
-        path or f"/v1/commands/{command_id}/cancel",
+        f"/v1/commands/{command_id}/cancel",
         method="POST",
         body=_compact({"mode": mode}),
     )
@@ -2121,6 +2335,29 @@ def _delete_code_context(
     return response["context"]
 
 
+def _get_code_context(
+    transport: SyncTransport,
+    sandbox_id: str,
+    context_id: str,
+) -> JsonObject:
+    response = transport.request(
+        f"/v1/sandboxes/{sandbox_id}/code/contexts/{context_id}",
+        method="GET",
+    )
+    return response["context"]
+
+
+def _list_code_contexts(
+    transport: SyncTransport,
+    sandbox_id: str,
+) -> list[JsonObject]:
+    response = transport.request(
+        f"/v1/sandboxes/{sandbox_id}/code/contexts",
+        method="GET",
+    )
+    return list(response["data"])
+
+
 async def _async_delete_code_context(
     transport: AsyncTransport,
     sandbox_id: str,
@@ -2131,6 +2368,29 @@ async def _async_delete_code_context(
         method="DELETE",
     )
     return response["context"]
+
+
+async def _async_get_code_context(
+    transport: AsyncTransport,
+    sandbox_id: str,
+    context_id: str,
+) -> JsonObject:
+    response = await transport.request(
+        f"/v1/sandboxes/{sandbox_id}/code/contexts/{context_id}",
+        method="GET",
+    )
+    return response["context"]
+
+
+async def _async_list_code_contexts(
+    transport: AsyncTransport,
+    sandbox_id: str,
+) -> list[JsonObject]:
+    response = await transport.request(
+        f"/v1/sandboxes/{sandbox_id}/code/contexts",
+        method="GET",
+    )
+    return list(response["data"])
 
 
 def _run_code(

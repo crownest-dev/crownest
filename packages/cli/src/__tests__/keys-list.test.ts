@@ -22,7 +22,7 @@ describe("keys list", () => {
       }),
     );
     const result = await runCli(
-      ["keys", "list"],
+      ["keys", "list", "--json"],
       {
         CROWNEST_API_URL: "https://api.test",
         CROWNEST_ORG_ID: "org_123",
@@ -46,6 +46,36 @@ describe("keys list", () => {
       },
       method: "GET",
     });
+  });
+
+  it("renders structured API errors", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "not_authorized",
+            details: { role: "viewer" },
+            message: "Owner role required.",
+          },
+        }),
+        { headers: { "content-type": "application/json" }, status: 403 },
+      ),
+    );
+    const result = await runCli(
+      ["keys", "list"],
+      {
+        CROWNEST_API_URL: "https://api.test",
+        CROWNEST_ORG_ID: "org_123",
+        CROWNEST_ROLE: "owner",
+        CROWNEST_USER_ID: "usr_viewer",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("error[not_authorized]: Owner role required.");
+    expect(result.stderr).toContain("status: 403");
+    expect(result.stderr).toContain('"role": "viewer"');
   });
 });
 

@@ -16,6 +16,7 @@ describe("runCli", () => {
   registerFileArtifactCliTests();
   registerLogCliTests();
   registerBinTests();
+  registerUsageAndOutputTests();
 });
 
 function registerSandboxCliTests() {
@@ -46,11 +47,9 @@ function registerSandboxCliTests() {
       fetchMock,
     );
 
-    expect(result).toEqual({
-      exitCode: 0,
-      stderr: "",
-      stdout: "sbx_123\n",
-    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("id: sbx_123");
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.test/v1/sandboxes",
       expect.objectContaining({ method: "POST" }),
@@ -86,11 +85,9 @@ function registerSandboxExtendCliTests() {
       fetchMock,
     );
 
-    expect(result).toEqual({
-      exitCode: 0,
-      stderr: "",
-      stdout: "sbx_123\t2026-06-09T16:00:00.000Z\n",
-    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("expiresAt: 2026-06-09T16:00:00.000Z");
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.test/v1/sandboxes/sbx_123/extend",
       expect.objectContaining({
@@ -111,7 +108,7 @@ function registerSandboxExtendCliTests() {
       fetchMock,
     );
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("--ttl-ms must be a positive integer");
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -146,42 +143,39 @@ function registerFileArtifactCliTests() {
       )
       .mockResolvedValueOnce(new Response("hello"));
 
-    await expect(
-      runCli(
-        ["files", "write", "sbx_123", "/workspace/input.txt", "hello"],
-        {
-          CROWNEST_API_KEY: "cn_live_test",
-          CROWNEST_API_URL: "https://api.test",
-        },
-        fetchMock,
-      ),
-    ).resolves.toMatchObject({ stdout: "/workspace/input.txt\n" });
+    const writeResult = await runCli(
+      ["files", "write", "sbx_123", "/workspace/input.txt", "hello"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+    expect(writeResult.stdout).toContain("path: /workspace/input.txt");
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://api.test/v1/sandboxes/sbx_123/files",
     );
-    await expect(
-      runCli(
-        ["artifacts", "create", "sbx_123", "/workspace/input.txt"],
-        {
-          CROWNEST_API_KEY: "cn_live_test",
-          CROWNEST_API_URL: "https://api.test",
-        },
-        fetchMock,
-      ),
-    ).resolves.toMatchObject({ stdout: "art_123\n" });
+    const createResult = await runCli(
+      ["artifacts", "create", "sbx_123", "/workspace/input.txt"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+    expect(createResult.stdout).toContain("id: art_123");
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
       "https://api.test/v1/sandboxes/sbx_123/artifacts",
     );
-    await expect(
-      runCli(
-        ["artifacts", "download", "art_123", "--output", outputPath],
-        {
-          CROWNEST_API_KEY: "cn_live_test",
-          CROWNEST_API_URL: "https://api.test",
-        },
-        fetchMock,
-      ),
-    ).resolves.toMatchObject({ stdout: `${outputPath}\n` });
+    const downloadResult = await runCli(
+      ["artifacts", "download", "art_123", "--output", outputPath],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+    expect(downloadResult.stdout).toContain(`path: ${outputPath}`);
     expect(readFileSync(outputPath, "utf8")).toBe("hello");
     const downloadCall = fetchMock.mock.calls.at(-1);
     expect(downloadCall?.[0]).toBe("https://api.test/v1/artifacts/art_123/download");
@@ -191,19 +185,58 @@ function registerFileArtifactCliTests() {
       "Bearer cn_live_test",
     );
   });
+
+  it("treats dash-prefixed file content as literal content", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      jsonResponse({
+        file: { path: "/workspace/list.md", sizeBytes: 6, type: "file" },
+      }),
+    );
+
+    const writeResult = await runCli(
+      ["files", "write", "sbx_123", "/workspace/list.md", "- item", "--json"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(writeResult.exitCode).toBe(0);
+    expect(writeResult.stderr).toBe("");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.test/v1/sandboxes/sbx_123/files",
+    );
+    const writeRequestBody = fetchMock.mock.calls[0]?.[1]?.body;
+    expect(typeof writeRequestBody).toBe("string");
+    expect(JSON.parse(writeRequestBody as string)).toMatchObject({
+      content: "- item",
+      createParents: false,
+      path: "/workspace/list.md",
+    });
+  });
 }
 
 function registerBinTests() {
-  it("advertises an executable crownest bin wrapper", () => {
+  it("advertises the built crownest binary for published installs", () => {
     const packageJson = JSON.parse(
       readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8"),
-    ) as { readonly bin: { readonly crownest: string } };
-    const binPath = resolve(import.meta.dirname, "../..", packageJson.bin.crownest);
-    const binSource = readFileSync(binPath, "utf8");
+    ) as {
+      readonly bin: { readonly crownest: string };
+      readonly exports?: unknown;
+      readonly files: readonly string[];
+      readonly publishConfig: Record<string, unknown>;
+    };
+    const sourceEntry = readFileSync(
+      resolve(import.meta.dirname, "../../src/index.ts"),
+      "utf8",
+    );
 
-    expect(packageJson.bin.crownest).toBe("./src/index.ts");
-    expect(binSource.startsWith("#!/usr/bin/env")).toBe(true);
-    expect(binSource).toContain("runCli");
+    expect(packageJson.bin.crownest).toBe("./dist/index.js");
+    expect(packageJson.files).toContain("dist");
+    expect(sourceEntry).toContain("runCli");
+    expect(packageJson.exports).toBeUndefined();
+    expect("bin" in packageJson.publishConfig).toBe(false);
   });
 }
 
@@ -243,6 +276,34 @@ function registerCommandCliTests() {
     );
   });
 
+  it("keeps --json after the separator inside the executed command", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      jsonResponse({
+        command: {
+          command: "echo --json",
+          cwd: "/workspace",
+          env: {},
+          id: "cmd_123",
+          sandboxId: "sbx_123",
+          status: "exited",
+        },
+      }),
+    );
+
+    await runCli(
+      ["commands", "run", "sbx_123", "--", "echo", "--json"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      command: "echo --json",
+    });
+  });
+
   it("cancels commands with force mode", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
       jsonResponse({
@@ -266,7 +327,8 @@ function registerCommandCliTests() {
       fetchMock,
     );
 
-    expect(result.stdout).toBe("cmd_123\tcanceled\n");
+    expect(result.stdout).toContain("id: cmd_123");
+    expect(result.stdout).toContain("status: canceled");
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://api.test/v1/commands/cmd_123/cancel",
     );
@@ -694,6 +756,284 @@ function registerLogCliTests() {
       stderr: "stream_gap: Requested command log position is no longer available.\n",
       stdout: "",
     });
+  });
+}
+
+function registerUsageAndOutputTests() {
+  it("rejects unknown commands with a help pointer", async () => {
+    const result = await runCli(["bogus"]);
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stderr: "Unknown command: bogus. Run `crownest --help` for the command list.\n",
+      stdout: "",
+    });
+  });
+
+  it("rejects unknown flags before making a request", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const result = await runCli(
+      ["sandboxes", "create", "--templte", "python"],
+      {},
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("unknown flag: --templte");
+    expect(result.stderr).toContain("--project");
+    expect(result.stderr).toContain("--template");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown double-dash tokens used as string flag values", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const result = await runCli(
+      ["sandboxes", "create", "--template", "--templte"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("unknown flag: --templte");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects extra positional arguments before mutating resources", async () => {
+    const uploadPath = resolve(
+      mkdtempSync(resolve(tmpdir(), "crownest-cli-upload-")),
+      "upload.txt",
+    );
+    const downloadPath = resolve(
+      mkdtempSync(resolve(tmpdir(), "crownest-cli-download-")),
+      "artifact.bin",
+    );
+    writeFileSync(uploadPath, "hello");
+    const environment = {
+      CROWNEST_API_KEY: "cn_live_test",
+      CROWNEST_API_URL: "https://api.test",
+    };
+    const mutationCases: readonly {
+      readonly argv: readonly string[];
+      readonly command: string;
+    }[] = [
+      {
+        argv: ["sandboxes", "extend", "sbx_123", "--ttl-ms", "1000", "extra"],
+        command: "sandboxes extend",
+      },
+      { argv: ["sandboxes", "kill", "sbx_123", "extra"], command: "sandboxes kill" },
+      { argv: ["commands", "cancel", "cmd_123", "extra"], command: "commands cancel" },
+      {
+        argv: ["code", "run", "sbx_123", "extra", "--code", "print(1)"],
+        command: "code run",
+      },
+      {
+        argv: ["files", "delete", "sbx_123", "/workspace/a", "extra"],
+        command: "files delete",
+      },
+      {
+        argv: ["files", "mkdir", "sbx_123", "/workspace/a", "extra"],
+        command: "files mkdir",
+      },
+      {
+        argv: ["files", "move", "sbx_123", "/workspace/a", "/workspace/b", "extra"],
+        command: "files move",
+      },
+      {
+        argv: ["files", "upload", "sbx_123", uploadPath, "/workspace/a", "extra"],
+        command: "files upload",
+      },
+      {
+        argv: ["files", "write", "sbx_123", "/workspace/a", "hello", "extra"],
+        command: "files write",
+      },
+      {
+        argv: ["artifacts", "create", "sbx_123", "/workspace/a", "extra"],
+        command: "artifacts create",
+      },
+      {
+        argv: ["artifacts", "download", "art_123", "--output", downloadPath, "extra"],
+        command: "artifacts download",
+      },
+      {
+        argv: ["artifacts", "delete", "art_123", "extra"],
+        command: "artifacts delete",
+      },
+      {
+        argv: ["previews", "create", "sbx_123", "--port", "8080", "extra"],
+        command: "previews create",
+      },
+      {
+        argv: ["previews", "revoke", "prv_123", "extra"],
+        command: "previews revoke",
+      },
+    ];
+
+    for (const testCase of mutationCases) {
+      const fetchMock = vi.fn<typeof fetch>();
+      const result = await runCli(testCase.argv, environment, fetchMock);
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain(
+        `unexpected argument for ${testCase.command}: extra`,
+      );
+      expect(fetchMock, testCase.command).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects leading flags as command sandbox ids before making a request", async () => {
+    const environment = {
+      CROWNEST_API_KEY: "cn_live_test",
+      CROWNEST_API_URL: "https://api.test",
+    };
+    const commandCases: readonly (readonly string[])[] = [
+      ["commands", "run", "--bogus", "--", "echo", "hi"],
+      ["commands", "start", "--json", "--", "echo", "hi"],
+    ];
+
+    for (const argv of commandCases) {
+      const fetchMock = vi.fn<typeof fetch>();
+      const result = await runCli(argv, environment, fetchMock);
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain("sandbox id must start with sbx_.");
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("requires the command separator before command execution mutates", async () => {
+    const environment = {
+      CROWNEST_API_KEY: "cn_live_test",
+      CROWNEST_API_URL: "https://api.test",
+    };
+    const commandCases: readonly (readonly string[])[] = [
+      ["commands", "run", "sbx_123", "--templte", "python"],
+      ["commands", "start", "sbx_123", "--json", "echo", "hi"],
+    ];
+
+    for (const argv of commandCases) {
+      const fetchMock = vi.fn<typeof fetch>();
+      const result = await runCli(argv, environment, fetchMock);
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain("command separator is required");
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("accepts dash-prefixed string flag values", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          'event: complete\ndata: {"type":"complete","data":{"sandboxId":"sbx_123","contextId":"cctx_123","language":"python","executionCount":1,"stdout":[],"stderr":[],"outputs":[]}}\n\n',
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      );
+    const result = await runCli(
+      ["code", "run", "sbx_123", "--code", "-1"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      code: "-1",
+    });
+  });
+
+  it("accepts explicit inline string flag values that start with double dash", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          'event: complete\ndata: {"type":"complete","data":{"sandboxId":"sbx_123","contextId":"cctx_123","language":"python","executionCount":1,"stdout":[],"stderr":[],"outputs":[]}}\n\n',
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      );
+    const result = await runCli(
+      ["code", "run", "sbx_123", "--code=--help"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      code: "--help",
+    });
+  });
+
+  it("prints list output as a compact JSON envelope with --json", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          {
+            expiresAt: "2026-06-09T15:30:00.000Z",
+            id: "sbx_123",
+            metadata: {},
+            orgId: "org_123",
+            projectId: "prj_123",
+            status: "ready",
+            templateId: "tpl_python",
+            templateSlug: "python",
+            templateVersion: "2026-06-01",
+            templateVersionId: "tplv_123",
+            ttlMs: 3_600_000,
+          },
+        ],
+        hasMore: false,
+      }),
+    );
+    const result = await runCli(
+      ["sandboxes", "list", "--json"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout) as unknown).toMatchObject({
+      data: [{ id: "sbx_123", status: "ready" }],
+    });
+    expect(result.stdout).not.toContain("\n ");
+  });
+
+  it("renders structured API errors with code, status, and details", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "quota_exceeded",
+            details: { limit: 3 },
+            message: "Sandbox quota exceeded.",
+          },
+        }),
+        { headers: { "content-type": "application/json" }, status: 403 },
+      ),
+    );
+    const result = await runCli(
+      ["projects", "list"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("error[quota_exceeded]: Sandbox quota exceeded.");
+    expect(result.stderr).toContain("status: 403");
+    expect(result.stderr).toContain('"limit": 3');
   });
 }
 

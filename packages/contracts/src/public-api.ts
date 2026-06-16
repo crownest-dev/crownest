@@ -138,6 +138,12 @@ export type CreateCodeContextResponse = {
   readonly context: CodeContextRef;
 };
 
+export type ListCodeContextsResponse = Pagination<CodeContextRef>;
+
+export type GetCodeContextResponse = {
+  readonly context: CodeContextRef;
+};
+
 export type DeleteCodeContextResponse = {
   readonly context: CodeContextRef;
 };
@@ -260,8 +266,24 @@ export type CreateApiKeyResponse = {
 
 export type ListApiKeysResponse = Pagination<ApiKey>;
 
+export type GetApiKeyResponse = {
+  readonly apiKey: ApiKey;
+};
+
+export type RevokeApiKeyResponse = {
+  readonly apiKey: ApiKey;
+};
+
 export type BootstrapResponse = {
   readonly apiKeys: readonly ApiKey[];
+  readonly project: Project;
+};
+
+export type CreateProjectBody = {
+  readonly name: string;
+};
+
+export type CreateProjectResponse = {
   readonly project: Project;
 };
 

@@ -10,6 +10,11 @@ export type McpSessionConfig = {
   readonly client?: CrowNestClient;
 };
 
+export type McpSessionSnapshot = {
+  readonly defaultSandboxId?: `sbx_${string}`;
+  readonly sandboxIds: readonly `sbx_${string}`[];
+};
+
 export class McpSessionError extends Error {
   readonly code: string;
 
@@ -42,14 +47,18 @@ export class McpSession {
   }
 
   async resolveSandbox(sandboxId?: `sbx_${string}`): Promise<SandboxHandle> {
-    if (sandboxId !== undefined) {
-      const sandbox = this.sandboxes.get(sandboxId);
-      if (sandbox === undefined) {
-        throw unknownSandboxError(sandboxId);
-      }
-      return sandbox;
+    if (sandboxId === undefined) {
+      return this.resolveDefaultSandbox();
     }
 
+    const sandbox = this.sandboxes.get(sandboxId);
+    if (sandbox === undefined) {
+      throw unknownSandboxError(sandboxId);
+    }
+    return sandbox;
+  }
+
+  async resolveDefaultSandbox(): Promise<SandboxHandle> {
     if (this.defaultSandboxId !== undefined) {
       const sandbox = this.sandboxes.get(this.defaultSandboxId);
       if (sandbox !== undefined) {
@@ -76,6 +85,28 @@ export class McpSession {
       });
 
     return this.defaultSandboxCreation;
+  }
+
+  rememberSandbox(sandbox: SandboxHandle): void {
+    this.trackSandbox(sandbox);
+  }
+
+  refreshTrackedSandbox(sandbox: SandboxHandle): boolean {
+    if (!this.sandboxes.has(sandbox.id)) {
+      return false;
+    }
+
+    this.trackSandbox(sandbox);
+    return true;
+  }
+
+  snapshot(): McpSessionSnapshot {
+    return {
+      ...(this.defaultSandboxId === undefined
+        ? {}
+        : { defaultSandboxId: this.defaultSandboxId }),
+      sandboxIds: [...this.sandboxes.keys()],
+    };
   }
 
   async killSandbox(sandboxId: `sbx_${string}`): Promise<void> {

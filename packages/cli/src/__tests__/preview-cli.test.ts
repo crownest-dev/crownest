@@ -34,7 +34,7 @@ function registerPreviewLifecycleTests() {
         fetchMock,
       ),
     ).resolves.toMatchObject({
-      stdout: "https://p-a1b2c3.preview.crownest.dev\n",
+      stdout: "https://p-a1b2c3.crownest.dev\n",
     });
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://api.test/v1/sandboxes/sbx_123/previews",
@@ -52,9 +52,12 @@ function registerPreviewLifecycleTests() {
       "https://api.test/v1/sandboxes/sbx_123/previews",
     );
 
-    await expect(
-      runCli(["previews", "revoke", "prv_123"], cliEnvironment, fetchMock),
-    ).resolves.toMatchObject({ stdout: "prv_123\trevoked\n" });
+    const revokeResult = await runCli(
+      ["previews", "revoke", "prv_123"],
+      cliEnvironment,
+      fetchMock,
+    );
+    expect(revokeResult.stdout).toContain("status: revoked");
     expect(fetchMock.mock.calls[2]?.[0]).toBe("https://api.test/v1/previews/prv_123");
     expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("DELETE");
   });
@@ -76,8 +79,7 @@ function registerPreviewTokenTests() {
         fetchMock,
       ),
     ).resolves.toMatchObject({
-      stdout:
-        "https://p-a1b2c3.preview.crownest.dev\nPreview token (shown once): pvt_abc123\n",
+      stdout: "https://p-a1b2c3.crownest.dev\nPreview token (shown once): pvt_abc123\n",
     });
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
       JSON.stringify({ authMode: "token", port: 8080 }),
@@ -96,7 +98,7 @@ function registerPreviewValidationTests() {
         fetchMock,
       ),
     ).resolves.toMatchObject({
-      exitCode: 1,
+      exitCode: 2,
       stderr: "port must be an integer from 1 to 65535.\n",
     });
     await expect(
@@ -106,7 +108,7 @@ function registerPreviewValidationTests() {
         fetchMock,
       ),
     ).resolves.toMatchObject({
-      exitCode: 1,
+      exitCode: 2,
       stderr: "port must be an integer from 1 to 65535.\n",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -122,7 +124,7 @@ function registerPreviewValidationTests() {
         fetchMock,
       ),
     ).resolves.toMatchObject({
-      exitCode: 1,
+      exitCode: 2,
       stderr: "--auth requires a value.\n",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -144,7 +146,7 @@ function previewResponse(
     projectId: "prj_123",
     sandboxId: "sbx_123",
     slug: "p-a1b2c3",
-    url: "https://p-a1b2c3.preview.crownest.dev",
+    url: "https://p-a1b2c3.crownest.dev",
     ...(input.revokedAt === undefined ? {} : { revokedAt: input.revokedAt }),
   };
 }

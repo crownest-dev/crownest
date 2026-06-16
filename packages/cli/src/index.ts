@@ -1,18 +1,24 @@
 #!/usr/bin/env -S node --import tsx
 
+/* eslint-disable max-lines -- The CLI router intentionally stays with the canonical command table that check-cli-surface greps. */
+
 import { realpathSync } from "node:fs";
 import { writeFile as writeFileBytes } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import {
   createCrowNestClient,
+  CrowNestApiError,
   type CrowNestClient,
   type CrowNestClientOptions,
   type RunCommandOptions,
 } from "@crownest/sdk";
 
+import packageJson from "../package.json";
 import { codeRunCommand } from "./code-commands";
 import { loadCredentialConfig } from "./credential-config";
+import { CLI_EXIT_API_ERROR, CLI_EXIT_OK, CLI_EXIT_USAGE_ERROR } from "./exit-codes";
 import {
   deleteFileCommand,
   listFilesCommand,
@@ -24,17 +30,33 @@ import {
   writeFileCommand,
 } from "./file-commands";
 import {
+  booleanFlag,
+  jsonFlagSpec,
+  parseFlags,
+  rejectExtraPositionals,
+  requiredArg,
+  requiredPrefixedArg,
+  stringArrayFlag,
+  stringFlag,
+  UsageError,
+} from "./flags";
+import { helpOutput } from "./help";
+import {
   createApiKeyCommand,
   listApiKeysCommand,
   loginCommand,
 } from "./human-commands";
+import { jsonEnvelope, renderList, renderRecord } from "./output";
 import {
   createPreviewCommand,
   listPreviewsCommand,
   revokePreviewCommand,
 } from "./preview-commands";
+import { shellCommand } from "./shell-command";
 
 export const cliName = "crownest";
+
+export { CLI_EXIT_API_ERROR, CLI_EXIT_OK, CLI_EXIT_USAGE_ERROR };
 
 export const canonicalCliCommands = [
   "login",
@@ -45,11 +67,11 @@ export const canonicalCliCommands = [
   "sandboxes extend",
   "sandboxes list",
   "sandboxes kill",
-  "exec",
   "commands run",
   "commands start",
   "commands cancel",
   "logs",
+  "shell",
   "code run",
   "files read",
   "files write",
@@ -93,12 +115,25 @@ export type CliOutput = {
   readonly stdout: { write(chunk: string): void };
 };
 
+export type CliInput = AsyncIterable<string> | Iterable<string>;
+
+// eslint-disable-next-line complexity -- Routing mirrors the public CLI command surface.
 export async function runCli(
   argv: readonly string[],
   environment: CliEnvironment = {},
   fetchImpl?: typeof fetch,
   output?: CliOutput,
+  input?: CliInput,
 ): Promise<CliResult> {
+  if (argv[0] === "--version" || argv[0] === "-V") {
+    return ok(`${packageJson.version}\n`);
+  }
+
+  const requestedHelp = helpOutput(argv);
+  if (requestedHelp !== undefined) {
+    return ok(requestedHelp);
+  }
+
   const [resource, action, ...rest] = argv;
   // Lazy: `login` must work before any credential exists, and the SDK now
   // fails fast at construction when no API key is available.
@@ -111,137 +146,205 @@ export async function runCli(
   const handlers: Record<string, () => Promise<CliResult>> = {
     "keys create": () => createApiKeyCommand(rest, environment, fetchImpl),
     "keys list": () => listApiKeysCommand(rest, environment, fetchImpl),
-    "commands cancel": () => cancelCommand(client(), rest),
-    "commands run": () => runCommand(client(), rest),
-    "commands start": () => startCommand(client(), rest),
-    "code run": () => codeRunCommand(client(), rest, output),
-    "artifacts create": () => createArtifact(client(), rest),
-    "artifacts delete": () => deleteArtifact(client(), rest),
-    "artifacts download": () => downloadArtifact(client(), rest),
-    "artifacts list": () => listArtifacts(client(), rest),
-    "files delete": () => deleteFileCommand(client(), rest),
-    "files list": () => listFilesCommand(client(), rest),
-    "files mkdir": () => mkdirCommand(client(), rest),
-    "files move": () => moveFileCommand(client(), rest),
-    "files read": () => readFileCommand(client(), rest),
-    "files stat": () => statFileCommand(client(), rest),
-    "files upload": () => uploadFileCommand(client(), rest),
-    "files write": () => writeFileCommand(client(), rest),
-    "previews create": () => createPreviewCommand(client(), rest),
-    "previews list": () => listPreviewsCommand(client(), rest),
-    "previews revoke": () => revokePreviewCommand(client(), rest),
-    "projects list": () => listProjects(client()),
-    "sandboxes create": () => createSandbox(client(), rest),
-    "sandboxes extend": () => extendSandbox(client(), rest),
-    "sandboxes kill": () => killSandbox(client(), rest),
-    "sandboxes list": () => listSandboxes(client()),
+    "commands cancel": () => cancelCommand(client, rest),
+    "commands run": () => runCommand(client, rest),
+    "commands start": () => startCommand(client, rest),
+    "code run": () => codeRunCommand(client, rest, output),
+    "artifacts create": () => createArtifact(client, rest),
+    "artifacts delete": () => deleteArtifact(client, rest),
+    "artifacts download": () => downloadArtifact(client, rest),
+    "artifacts list": () => listArtifacts(client, rest),
+    "files delete": () => deleteFileCommand(client, rest),
+    "files list": () => listFilesCommand(client, rest),
+    "files mkdir": () => mkdirCommand(client, rest),
+    "files move": () => moveFileCommand(client, rest),
+    "files read": () => readFileCommand(client, rest),
+    "files stat": () => statFileCommand(client, rest),
+    "files upload": () => uploadFileCommand(client, rest),
+    "files write": () => writeFileCommand(client, rest),
+    "previews create": () => createPreviewCommand(client, rest),
+    "previews list": () => listPreviewsCommand(client, rest),
+    "previews revoke": () => revokePreviewCommand(client, rest),
+    "projects list": () => listProjects(client, rest),
+    "sandboxes create": () => createSandbox(client, rest),
+    "sandboxes extend": () => extendSandbox(client, rest),
+    "sandboxes kill": () => killSandbox(client, rest),
+    "sandboxes list": () => listSandboxes(client, rest),
   };
   const handler =
     resource === "logs"
-      ? () => logs(client(), [action, ...rest], output)
+      ? () => logs(client, [action, ...rest], output)
       : resource === "login"
         ? () => Promise.resolve(loginCommand(compact([action, ...rest]), environment))
-        : resource === "exec"
-          ? () => executeCommand(client(), compact([action, ...rest]), "run")
+        : resource === "shell"
+          ? () => shellCommand(client, compact([action, ...rest]), input, output)
           : handlers[command];
 
   try {
     if (handler) return await handler();
 
-    return fail(`Unknown command. Try: ${canonicalCliCommands.join(", ")}\n`, 2);
+    return fail(
+      `Unknown command: ${argv.join(" ") || "(empty)"}. Run \`crownest --help\` for the command list.\n`,
+      CLI_EXIT_USAGE_ERROR,
+    );
   } catch (error) {
-    return fail(`${error instanceof Error ? error.message : String(error)}\n`, 1);
+    if (error instanceof UsageError) {
+      return fail(`${error.message}\n`, CLI_EXIT_USAGE_ERROR);
+    }
+    if (error instanceof CrowNestApiError) {
+      return fail(renderApiError(error), CLI_EXIT_API_ERROR);
+    }
+    return fail(
+      `${error instanceof Error ? error.message : String(error)}\n`,
+      CLI_EXIT_API_ERROR,
+    );
   }
 }
 
 async function createSandbox(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const projectId = optionValue(args, "--project") as `prj_${string}` | undefined;
-  const template = optionValue(args, "--template");
-  const sandbox = await client.sandboxes.create({
+  const parsed = parseFlags(args, {
+    "--project": "string",
+    "--template": "string",
+    ...jsonFlagSpec,
+  });
+  rejectExtraPositionals(parsed.positionals, "sandboxes create");
+  const projectId = stringFlag(parsed.flags, "--project") as
+    | `prj_${string}`
+    | undefined;
+  const template = stringFlag(parsed.flags, "--template");
+  const sandbox = await client().sandboxes.create({
     ...(projectId === undefined ? {} : { projectId }),
     ...(template === undefined ? {} : { template }),
   });
 
-  return ok(`${sandbox.id}\n`);
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(sandbox) : renderRecord(sandbox),
+  );
 }
 
-async function listSandboxes(client: CrowNestClient): Promise<CliResult> {
-  const sandboxes = await client.sandboxes.list();
-  return ok(`${JSON.stringify({ data: sandboxes }, null, 2)}\n`);
+async function listSandboxes(
+  client: () => CrowNestClient,
+  args: readonly string[],
+): Promise<CliResult> {
+  const json = parseJsonOnly(args, "sandboxes list");
+  const sandboxes = await client().sandboxes.list();
+  return ok(
+    json
+      ? jsonEnvelope(sandboxes)
+      : renderList(sandboxes, [
+          { key: "id" },
+          { key: "status" },
+          { key: "templateSlug", label: "template" },
+          { key: "expiresAt" },
+        ]),
+  );
 }
 
 async function extendSandbox(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const ttlMs = positiveIntegerOption(args, "--ttl-ms");
-  const extended = await client.sandboxes.extend(
-    requiredSandboxId(args[0], "sandbox id"),
-    { ttlMs },
+  const parsed = parseFlags(args, {
+    "--ttl-ms": "string",
+    ...jsonFlagSpec,
+  });
+  const ttlMs = positiveIntegerFlag(parsed.flags, "--ttl-ms");
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  rejectExtraPositionals(parsed.positionals.slice(1), "sandboxes extend");
+  const extended = await client().sandboxes.extend(sandboxId, { ttlMs });
+  return ok(
+    booleanFlag(parsed.flags, "--json")
+      ? jsonEnvelope(extended)
+      : renderRecord(extended),
   );
-
-  return ok(`${extended.id}\t${extended.expiresAt}\n`);
 }
 
-async function listProjects(client: CrowNestClient): Promise<CliResult> {
-  const projects = await client.projects.list();
-  return ok(`${JSON.stringify({ data: projects }, null, 2)}\n`);
+async function listProjects(
+  client: () => CrowNestClient,
+  args: readonly string[],
+): Promise<CliResult> {
+  const json = parseJsonOnly(args, "projects list");
+  const projects = await client().projects.list();
+  return ok(
+    json
+      ? jsonEnvelope(projects)
+      : renderList(projects, [{ key: "id" }, { key: "name" }, { key: "orgId" }]),
+  );
 }
 
 async function killSandbox(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const killed = await client.sandboxes.kill(requiredSandboxId(args[0], "sandbox id"));
-
-  return ok(`${killed.id}\t${killed.status}\n`);
+  const parsed = parseFlags(args, jsonFlagSpec);
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  rejectExtraPositionals(parsed.positionals.slice(1), "sandboxes kill");
+  const killed = await client().sandboxes.kill(sandboxId);
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(killed) : renderRecord(killed),
+  );
 }
 
 async function runCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
   return await executeCommand(client, args, "run");
 }
 
 async function startCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
   return await executeCommand(client, args, "start");
 }
 
 async function cancelCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const commandId = requiredArg(args[0], "command id");
-  const command = await client.commands.cancel(commandId as `cmd_${string}`, {
-    mode: args.includes("--force") ? "force" : "graceful",
+  const parsed = parseFlags(args, {
+    "--force": "boolean",
+    ...jsonFlagSpec,
   });
-
-  return ok(`${command.id}\t${command.status}\n`);
+  const commandId = requiredArg(parsed.positionals[0], "command id");
+  rejectExtraPositionals(parsed.positionals.slice(1), "commands cancel");
+  const command = await client().commands.cancel(commandId as `cmd_${string}`, {
+    mode: booleanFlag(parsed.flags, "--force") ? "force" : "graceful",
+  });
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(command) : renderRecord(command),
+  );
 }
 
 async function logs(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly (string | undefined)[],
   output: CliOutput | undefined,
 ): Promise<CliResult> {
-  const target = requiredArg(args[0], "command id");
-  const commandId = target.startsWith("cmd_") ? target : optionValue(args, "--command");
+  const parsed = parseFlags(compact(args), {
+    "--command": "string",
+    ...jsonFlagSpec,
+  });
+  const target = requiredArg(parsed.positionals[0], "command id");
+  const commandId = target.startsWith("cmd_")
+    ? target
+    : stringFlag(parsed.flags, "--command");
 
   if (!commandId?.startsWith("cmd_")) {
-    throw new Error(
+    throw new UsageError(
       "command id is required. Use logs cmd_... or logs sbx_... --command cmd_...",
     );
   }
+  rejectExtraPositionals(parsed.positionals.slice(1), "logs");
 
   let stdout = "";
-  for await (const event of client.commands.streamLogs(commandId as `cmd_${string}`)) {
+  for await (const event of client().commands.streamLogs(
+    commandId as `cmd_${string}`,
+  )) {
     if (event.type === "log") {
       if (output) {
         const stream = event.stream === "stderr" ? output.stderr : output.stdout;
@@ -258,74 +361,113 @@ async function logs(
 }
 
 async function createArtifact(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const name = optionValue(args, "--name");
-  const artifact = await client.artifacts.create(
-    requiredSandboxId(args[0], "sandbox id"),
-    {
-      path: requiredArg(args[1], "path"),
-      ...(name === undefined ? {} : { name }),
-    },
+  const parsed = parseFlags(args, {
+    "--name": "string",
+    ...jsonFlagSpec,
+  });
+  const name = stringFlag(parsed.flags, "--name");
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  const path = requiredArg(parsed.positionals[1], "path");
+  rejectExtraPositionals(parsed.positionals.slice(2), "artifacts create");
+  const artifact = await client().artifacts.create(sandboxId, {
+    path,
+    ...(name === undefined ? {} : { name }),
+  });
+  return ok(
+    booleanFlag(parsed.flags, "--json")
+      ? jsonEnvelope(artifact)
+      : renderRecord(artifact),
   );
-  return ok(`${artifact.id}\n`);
 }
 
 async function listArtifacts(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const artifacts = await client.artifacts.list(
-    requiredSandboxId(args[0], "sandbox id"),
+  const parsed = parseFlags(args, jsonFlagSpec);
+  const sandboxId = requiredSandboxId(parsed.positionals[0], "sandbox id");
+  rejectExtraPositionals(parsed.positionals.slice(1), "artifacts list");
+  const artifacts = await client().artifacts.list(sandboxId);
+  return ok(
+    booleanFlag(parsed.flags, "--json")
+      ? jsonEnvelope(artifacts)
+      : renderList(artifacts, [
+          { key: "id" },
+          { key: "name" },
+          { key: "sizeBytes", label: "size" },
+          { key: "createdAt" },
+        ]),
   );
-  return ok(`${JSON.stringify({ data: artifacts }, null, 2)}\n`);
 }
 
 async function downloadArtifact(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const artifactId = requiredArg(args[0], "artifact id") as `art_${string}`;
-  const outputPath = optionValue(args, "--output") ?? optionValue(args, "-o");
+  const parsed = parseFlags(args, {
+    "--output": "string",
+    ...jsonFlagSpec,
+  });
+  const artifactId = requiredArg(
+    parsed.positionals[0],
+    "artifact id",
+  ) as `art_${string}`;
+  const outputPath = stringFlag(parsed.flags, "--output");
   if (!outputPath) {
-    throw new Error("output path is required. Use --output <path>.");
+    throw new UsageError("output path is required. Use --output <path>.");
   }
+  rejectExtraPositionals(parsed.positionals.slice(1), "artifacts download");
 
-  const data = await client.artifacts.download(artifactId);
+  const data = await client().artifacts.download(artifactId);
   await writeFileBytes(outputPath, data);
-  return ok(`${outputPath}\n`);
+  const result = { path: outputPath };
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(result) : renderRecord(result),
+  );
 }
 
 async function deleteArtifact(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
 ): Promise<CliResult> {
-  const artifactId = requiredArg(args[0], "artifact id") as `art_${string}`;
-  const artifact = await client.artifacts.delete(artifactId);
-  return ok(`${artifact.id}\tdeleted\n`);
+  const parsed = parseFlags(args, jsonFlagSpec);
+  const artifactId = requiredArg(
+    parsed.positionals[0],
+    "artifact id",
+  ) as `art_${string}`;
+  rejectExtraPositionals(parsed.positionals.slice(1), "artifacts delete");
+  const artifact = await client().artifacts.delete(artifactId);
+  const result = { ...artifact, status: "deleted" };
+  return ok(
+    booleanFlag(parsed.flags, "--json") ? jsonEnvelope(result) : renderRecord(result),
+  );
 }
 
 function requiredSandboxId(value: string | undefined, label: string): `sbx_${string}` {
-  return requiredArg(value, label) as `sbx_${string}`;
+  return requiredPrefixedArg(value, label, "sbx_") as `sbx_${string}`;
 }
 
 async function executeCommand(
-  client: CrowNestClient,
+  client: () => CrowNestClient,
   args: readonly string[],
   mode: "run" | "start",
 ): Promise<CliResult> {
-  const sandboxId = requiredArg(args[0], "sandbox id");
+  const sandboxId = requiredSandboxId(args[0], "sandbox id");
   const commandArgs = args.slice(1);
   const command = commandAfterSeparator(commandArgs);
-  const options =
-    mode === "run" ? runCommandOptions(commandOptionArgs(commandArgs)) : {};
+  const parsedOptions =
+    mode === "run"
+      ? runCommandOptions(commandOptionArgs(commandArgs))
+      : startCommandOptions(commandOptionArgs(commandArgs));
   const result =
     mode === "run"
-      ? await client.commands.run(sandboxId as `sbx_${string}`, command, options)
-      : await client.commands.start(sandboxId as `sbx_${string}`, command, options);
+      ? await client().commands.run(sandboxId, command, parsedOptions.options)
+      : await client().commands.start(sandboxId, command, parsedOptions.options);
 
-  return ok(`${JSON.stringify(result, null, 2)}\n`);
+  return ok(parsedOptions.json ? jsonEnvelope(result) : renderRecord(result));
 }
 
 function clientOptions(
@@ -343,27 +485,18 @@ function clientOptions(
   };
 }
 
-function optionValue(
-  args: readonly (string | undefined)[],
+function positiveIntegerFlag(
+  flags: Record<string, string | boolean | readonly string[]>,
   flag: string,
-): string | undefined {
-  const index = args.indexOf(flag);
-  if (index < 0) {
-    return undefined;
-  }
-
-  return args[index + 1];
-}
-
-function positiveIntegerOption(args: readonly string[], flag: string): number {
-  const value = optionValue(args, flag);
+): number {
+  const value = stringFlag(flags, flag);
   if (value === undefined) {
-    throw new Error(`${flag} is required.`);
+    throw new UsageError(`${flag} is required.`);
   }
 
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${flag} must be a positive integer.`);
+    throw new UsageError(`${flag} must be a positive integer.`);
   }
 
   return parsed;
@@ -371,42 +504,63 @@ function positiveIntegerOption(args: readonly string[], flag: string): number {
 
 function commandAfterSeparator(args: readonly string[]): string {
   const separatorIndex = args.indexOf("--");
-  const commandParts = separatorIndex >= 0 ? args.slice(separatorIndex + 1) : args;
+  if (separatorIndex < 0) {
+    throw new UsageError("command separator is required. Use -- before the command.");
+  }
 
+  const commandParts = args.slice(separatorIndex + 1);
   if (commandParts.length === 0) {
-    throw new Error("command is required.");
+    throw new UsageError("command is required.");
   }
 
   return commandParts.map(shellEscapeArg).join(" ");
 }
 
-function runCommandOptions(args: readonly string[]): RunCommandOptions {
-  const collect = collectOptions(args);
-  const collectOn = optionValue(args, "--collect-on");
+function runCommandOptions(args: readonly string[]): {
+  readonly json: boolean;
+  readonly options: RunCommandOptions;
+} {
+  const parsed = parseFlags(args, {
+    "--collect": "string[]",
+    "--collect-on": "string",
+    ...jsonFlagSpec,
+  });
+  rejectExtraPositionals(parsed.positionals, "commands run");
+  const collect = stringArrayFlag(parsed.flags, "--collect").map((path) => ({
+    path,
+  }));
+  const collectOn = stringFlag(parsed.flags, "--collect-on");
   if (collectOn !== undefined && collectOn !== "success" && collectOn !== "always") {
-    throw new Error("collect-on must be success or always.");
+    throw new UsageError("collect-on must be success or always.");
   }
 
   return {
-    ...(collect.length === 0 ? {} : { collect }),
-    ...(collectOn === undefined ? {} : { collectOn }),
+    json: booleanFlag(parsed.flags, "--json"),
+    options: {
+      ...(collect.length === 0 ? {} : { collect }),
+      ...(collectOn === undefined ? {} : { collectOn }),
+    },
   };
 }
 
-function collectOptions(args: readonly string[]) {
-  const collect: { readonly path: string }[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--collect") {
-      collect.push({ path: requiredArg(args[index + 1], "collect path") });
-    }
-  }
-
-  return collect;
+function startCommandOptions(args: readonly string[]): {
+  readonly json: boolean;
+  readonly options: Record<string, never>;
+} {
+  const parsed = parseFlags(args, jsonFlagSpec);
+  rejectExtraPositionals(parsed.positionals, "commands start");
+  return { json: booleanFlag(parsed.flags, "--json"), options: {} };
 }
 
 function commandOptionArgs(args: readonly string[]): readonly string[] {
   const separatorIndex = args.indexOf("--");
   return separatorIndex < 0 ? [] : args.slice(0, separatorIndex);
+}
+
+function parseJsonOnly(args: readonly string[], command: string): boolean {
+  const parsed = parseFlags(args, jsonFlagSpec);
+  rejectExtraPositionals(parsed.positionals, command);
+  return booleanFlag(parsed.flags, "--json");
 }
 
 function shellEscapeArg(arg: string): string {
@@ -417,30 +571,46 @@ function shellEscapeArg(arg: string): string {
   return `'${arg.replaceAll("'", "'\"'\"'")}'`;
 }
 
-function requiredArg(value: string | undefined, label: string): string {
-  if (!value) {
-    throw new Error(`${label} is required.`);
-  }
-
-  return value;
-}
-
 function compact(values: readonly (string | undefined)[]): readonly string[] {
   return values.filter((value): value is string => value !== undefined);
 }
 
 function ok(stdout: string): CliResult {
-  return { exitCode: 0, stderr: "", stdout };
+  return { exitCode: CLI_EXIT_OK, stderr: "", stdout };
 }
 
 function fail(stderr: string, exitCode: number): CliResult {
   return { exitCode, stderr, stdout: "" };
 }
 
+function renderApiError(error: CrowNestApiError): string {
+  const lines = [`error[${error.code}]: ${error.message}`, `status: ${error.status}`];
+  if (error.details !== undefined) {
+    lines.push("details:");
+    lines.push(
+      JSON.stringify(error.details, null, 2)
+        .split("\n")
+        .map((line) => `  ${line}`)
+        .join("\n"),
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
 async function main() {
-  const result = await runCli(process.argv.slice(2), process.env, undefined, {
-    stderr: process.stderr,
-    stdout: process.stdout,
+  const rl = createInterface({ input: process.stdin });
+  const result = await runCli(
+    process.argv.slice(2),
+    process.env,
+    undefined,
+    {
+      stderr: process.stderr,
+      stdout: process.stdout,
+    },
+    rl,
+  ).finally(() => {
+    rl.close();
   });
 
   if (result.stdout.length > 0) process.stdout.write(result.stdout);
@@ -463,3 +633,5 @@ function isMainModule(entrypoint: string | undefined): boolean {
 }
 
 if (isMainModule(process.argv[1])) void main();
+
+/* eslint-enable max-lines -- End CLI router file. */

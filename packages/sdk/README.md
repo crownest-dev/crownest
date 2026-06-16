@@ -14,7 +14,7 @@ const client = createCrowNestClient();
 
 const sandbox = await client.sandboxes.create({ template: "python" });
 
-const result = await sandbox.commands.run("python -c 'print(40 + 2)'");
+const result = await sandbox.commands.run("python3 -c 'print(40 + 2)'");
 console.log(result.exitCode, result.stdout);
 
 await sandbox.files.write("notes.txt", "hello from crownest");
@@ -24,7 +24,7 @@ console.log(content);
 const artifact = await sandbox.artifacts.create({ path: "notes.txt" });
 console.log("artifact:", artifact.id);
 
-await sandbox.commands.start("python -m http.server 8000");
+await sandbox.commands.start("python3 -m http.server 8000");
 const { preview } = await sandbox.previews.create({ port: 8000 });
 console.log("preview:", preview.url);
 

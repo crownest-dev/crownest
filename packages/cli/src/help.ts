@@ -1,0 +1,339 @@
+import { CLI_EXIT_API_ERROR, CLI_EXIT_OK, CLI_EXIT_USAGE_ERROR } from "./exit-codes";
+import type { CanonicalCliCommand } from "./index";
+
+type CommandHelp = {
+  readonly flags?: readonly {
+    readonly flag: string;
+    readonly description: string;
+  }[];
+  readonly summary: string;
+  readonly usage: string;
+};
+
+const jsonFlag = {
+  flag: "--json",
+  description: 'Print a stable JSON envelope: {"data": ...}.',
+} as const;
+
+const streamingJsonFlag = {
+  flag: "--json",
+  description: "Accepted for consistency; streamed output remains raw.",
+} as const;
+
+export const cliCommandHelp = {
+  login: {
+    summary: "Save API credentials or print login guidance.",
+    usage: "crownest login [--api-key <key>] [--api-url <url>] [--json]",
+    flags: [
+      { flag: "--api-key", description: "API key to save." },
+      { flag: "--api-url", description: "API base URL." },
+      jsonFlag,
+    ],
+  },
+  "projects list": {
+    summary: "List projects available to the configured API key.",
+    usage: "crownest projects list [--json]",
+    flags: [jsonFlag],
+  },
+  "keys create": {
+    summary: "Create an API key from a human dashboard session.",
+    usage:
+      "crownest keys create [--name <name>] [--project <prj_id>] [--scope <scope>]... [--api-url <url>] [--json]",
+    flags: [
+      { flag: "--name", description: "API key display name." },
+      { flag: "--project", description: "Restrict the key to one project." },
+      { flag: "--scope", description: "Scope to grant. Repeatable." },
+      { flag: "--api-url", description: "API base URL for key management." },
+      jsonFlag,
+    ],
+  },
+  "keys list": {
+    summary: "List API keys from a human dashboard session.",
+    usage: "crownest keys list [--api-url <url>] [--json]",
+    flags: [
+      { flag: "--api-url", description: "API base URL for key management." },
+      jsonFlag,
+    ],
+  },
+  "sandboxes create": {
+    summary: "Create a sandbox.",
+    usage:
+      "crownest sandboxes create [--project <prj_id>] [--template <slug>] [--json]",
+    flags: [
+      { flag: "--project", description: "Project to create the sandbox in." },
+      { flag: "--template", description: "Template slug such as python or node." },
+      jsonFlag,
+    ],
+  },
+  "sandboxes extend": {
+    summary: "Reset a live sandbox TTL from now.",
+    usage: "crownest sandboxes extend <sandbox-id> --ttl-ms <ms> [--json]",
+    flags: [
+      { flag: "--ttl-ms", description: "New sandbox lifetime in milliseconds." },
+      jsonFlag,
+    ],
+  },
+  "sandboxes list": {
+    summary: "List live sandboxes.",
+    usage: "crownest sandboxes list [--json]",
+    flags: [jsonFlag],
+  },
+  "sandboxes kill": {
+    summary: "Destroy a sandbox.",
+    usage: "crownest sandboxes kill <sandbox-id> [--json]",
+    flags: [jsonFlag],
+  },
+  "commands run": {
+    summary: "Run a command and wait for it to finish.",
+    usage:
+      "crownest commands run <sandbox-id> [--collect <path>]... [--collect-on success|always] [--json] -- <command>",
+    flags: [
+      {
+        flag: "--collect",
+        description: "Workspace path to export as an artifact. Repeatable.",
+      },
+      { flag: "--collect-on", description: "Collect on success or always." },
+      jsonFlag,
+    ],
+  },
+  "commands start": {
+    summary: "Start a command without waiting for completion.",
+    usage: "crownest commands start <sandbox-id> [--json] -- <command>",
+    flags: [jsonFlag],
+  },
+  "commands cancel": {
+    summary: "Cancel a running command.",
+    usage: "crownest commands cancel <command-id> [--force] [--json]",
+    flags: [
+      {
+        flag: "--force",
+        description: "Use forceful cancellation instead of graceful cancellation.",
+      },
+      jsonFlag,
+    ],
+  },
+  logs: {
+    summary: "Stream command logs until the command reaches a terminal state.",
+    usage:
+      "crownest logs <command-id> [--json]\ncrownest logs <sandbox-id> --command <command-id> [--json]",
+    flags: [
+      {
+        flag: "--command",
+        description: "Command ID when the first argument is a sandbox ID.",
+      },
+      streamingJsonFlag,
+    ],
+  },
+  shell: {
+    summary: "Open a line-oriented sandbox shell.",
+    usage: "crownest shell <sandbox-id> [--lang python|javascript|typescript] [--bash]",
+    flags: [
+      {
+        flag: "--lang",
+        description: "Code shell language: python, javascript, or typescript.",
+      },
+      {
+        flag: "--bash",
+        description: "Run each line as an independent shell command.",
+      },
+    ],
+  },
+  "code run": {
+    summary: "Run interpreter code in a sandbox.",
+    usage:
+      "crownest code run <sandbox-id> (--code <source> | --file <path>) [--language python|javascript|typescript] [--artifact-policy inline_only|promote] [--timeout-ms <ms>] [--context <cctx_id>] [--cwd <path>] [--idempotency-key <key>] [--json]",
+    flags: [
+      { flag: "--code", description: "Inline source code to run." },
+      { flag: "--file", description: "Local source file to run." },
+      {
+        flag: "--language",
+        description: "Language: python, javascript, or typescript.",
+      },
+      {
+        flag: "--artifact-policy",
+        description: "Artifact handling: inline_only or promote.",
+      },
+      { flag: "--timeout-ms", description: "Execution timeout in milliseconds." },
+      { flag: "--context", description: "Existing Code Context ID." },
+      { flag: "--cwd", description: "Working directory inside the sandbox." },
+      {
+        flag: "--idempotency-key",
+        description: "Idempotency key for retry-safe requests.",
+      },
+      streamingJsonFlag,
+    ],
+  },
+  "files read": {
+    summary: "Print a workspace file's content.",
+    usage: "crownest files read <sandbox-id> <path> [--json]",
+    flags: [jsonFlag],
+  },
+  "files write": {
+    summary: "Write content to a workspace file.",
+    usage:
+      "crownest files write <sandbox-id> <path> <content> [--create-parents] [--json]",
+    flags: [
+      { flag: "--create-parents", description: "Create missing parent directories." },
+      jsonFlag,
+    ],
+  },
+  "files upload": {
+    summary: "Upload a local file into the workspace.",
+    usage:
+      "crownest files upload <sandbox-id> <local-path> [<remote-path>] [--to <remote-path>] [--create-parents] [--json]",
+    flags: [
+      { flag: "--to", description: "Destination workspace path." },
+      { flag: "--create-parents", description: "Create missing parent directories." },
+      jsonFlag,
+    ],
+  },
+  "files list": {
+    summary: "List workspace directory entries.",
+    usage: "crownest files list <sandbox-id> [path] [--json]",
+    flags: [jsonFlag],
+  },
+  "files stat": {
+    summary: "Print workspace file metadata.",
+    usage: "crownest files stat <sandbox-id> <path> [--json]",
+    flags: [jsonFlag],
+  },
+  "files mkdir": {
+    summary: "Create a workspace directory.",
+    usage: "crownest files mkdir <sandbox-id> <path> [--parents] [--json]",
+    flags: [
+      { flag: "--parents", description: "Create intermediate directories." },
+      jsonFlag,
+    ],
+  },
+  "files move": {
+    summary: "Move or rename a workspace file or directory.",
+    usage: "crownest files move <sandbox-id> <from> <to> [--overwrite] [--json]",
+    flags: [
+      { flag: "--overwrite", description: "Replace an existing destination." },
+      jsonFlag,
+    ],
+  },
+  "files delete": {
+    summary: "Delete a workspace file or empty directory.",
+    usage: "crownest files delete <sandbox-id> <path> [--json]",
+    flags: [jsonFlag],
+  },
+  "artifacts create": {
+    summary: "Export a workspace file as an artifact.",
+    usage: "crownest artifacts create <sandbox-id> <path> [--name <name>] [--json]",
+    flags: [{ flag: "--name", description: "Artifact display name." }, jsonFlag],
+  },
+  "artifacts list": {
+    summary: "List artifacts exported from a sandbox.",
+    usage: "crownest artifacts list <sandbox-id> [--json]",
+    flags: [jsonFlag],
+  },
+  "artifacts download": {
+    summary: "Download an artifact to a local file.",
+    usage: "crownest artifacts download <artifact-id> --output <path> [--json]",
+    flags: [{ flag: "--output", description: "Local output path." }, jsonFlag],
+  },
+  "artifacts delete": {
+    summary: "Delete an artifact.",
+    usage: "crownest artifacts delete <artifact-id> [--json]",
+    flags: [jsonFlag],
+  },
+  "previews create": {
+    summary: "Expose a sandbox port as an authenticated preview.",
+    usage:
+      "crownest previews create <sandbox-id> --port <port> [--auth authenticated|token] [--json]",
+    flags: [
+      { flag: "--port", description: "Sandbox port from 1 to 65535." },
+      { flag: "--auth", description: "Preview auth mode: authenticated or token." },
+      jsonFlag,
+    ],
+  },
+  "previews list": {
+    summary: "List previews for a sandbox.",
+    usage: "crownest previews list <sandbox-id> [--json]",
+    flags: [jsonFlag],
+  },
+  "previews revoke": {
+    summary: "Revoke a preview.",
+    usage: "crownest previews revoke <preview-id> [--json]",
+    flags: [jsonFlag],
+  },
+} as const satisfies Record<CanonicalCliCommand, CommandHelp>;
+
+export function helpOutput(argv: readonly string[]): string | undefined {
+  if (argv.length === 0 || isHelpToken(argv[0])) {
+    return renderGlobalHelp();
+  }
+
+  if (argv[0] === "help") {
+    const command = argv.slice(1).join(" ");
+    return command.length === 0 ? renderGlobalHelp() : renderCommandHelp(command);
+  }
+
+  if (argv.some(isHelpToken)) {
+    const command = argv.filter((arg) => !isHelpToken(arg)).join(" ");
+    return command.length === 0 ? renderGlobalHelp() : renderCommandHelp(command);
+  }
+
+  return undefined;
+}
+
+export function renderGlobalHelp(): string {
+  const commands = Object.entries(cliCommandHelp);
+  const width = Math.max(...commands.map(([command]) => command.length));
+  const lines = commands.map(
+    ([command, help]) => `  ${command.padEnd(width)}  ${help.summary}`,
+  );
+
+  return [
+    "CrowNest CLI",
+    "",
+    "Usage:",
+    "  crownest <command> [options]",
+    "  crownest help <command>",
+    "  crownest --version",
+    "",
+    "Commands:",
+    ...lines,
+    "",
+    "Run `crownest help <command>` for command-specific flags.",
+    ...exitCodeHelp(),
+    "Docs: https://crownest.dev/docs",
+    "",
+  ].join("\n");
+}
+
+export function renderCommandHelp(command: string): string | undefined {
+  if (!Object.hasOwn(cliCommandHelp, command)) return undefined;
+
+  const help = cliCommandHelp[command as CanonicalCliCommand];
+  const flagLines = help.flags.map(
+    ({ flag, description }) => `  ${flag.padEnd(18)} ${description}`,
+  );
+
+  return [
+    `crownest ${command}`,
+    "",
+    help.summary,
+    "",
+    "Usage:",
+    `  ${help.usage}`,
+    ...(flagLines.length === 0 ? [] : ["", "Flags:", ...flagLines]),
+    ...exitCodeHelp(),
+    "",
+  ].join("\n");
+}
+
+function exitCodeHelp(): readonly string[] {
+  return [
+    "",
+    "Exit codes:",
+    `  ${CLI_EXIT_OK}  success`,
+    `  ${CLI_EXIT_API_ERROR}  API or runtime error`,
+    `  ${CLI_EXIT_USAGE_ERROR}  usage error (invalid command, flags, or arguments)`,
+  ];
+}
+
+function isHelpToken(value: string | undefined): boolean {
+  return value === "--help" || value === "-h";
+}

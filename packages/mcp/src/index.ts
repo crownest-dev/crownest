@@ -12,17 +12,57 @@ import { registerCrowNestTools } from "./tools";
 import { OmittedArgumentsTransport } from "./transport";
 
 export async function main(): Promise<void> {
+  if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    console.log(helpText(readPackageVersion()));
+    return;
+  }
+
+  if (process.argv.includes("--version") || process.argv.includes("-v")) {
+    console.log(readPackageVersion());
+    return;
+  }
+
   const session = new CrowNestMcpSession(loadSessionConfig());
-  const server = new McpServer({
-    name: "@crownest/mcp",
-    version: readPackageVersion(),
-  });
+  const server = createCrowNestMcpServer(readPackageVersion());
 
   registerCrowNestTools(server, session);
   installCleanupHandlers(session);
 
   const transport = new OmittedArgumentsTransport(new StdioServerTransport());
   await server.connect(transport);
+}
+
+export const CROWNEST_MCP_INSTRUCTIONS = [
+  "CrowNest gives coding agents live cloud Sandboxes with a Workspace rooted at /workspace.",
+  "Tools that accept sandbox_id can omit it to use the MCP session's lazy default Sandbox: the first default-scoped call creates it, later calls reuse it until it expires, is killed, or this MCP server exits.",
+  "Sandboxes created by this MCP server are best-effort killed on MCP session exit; Sandbox TTL can be extended while live, and the platform TTL backstop still applies.",
+  "run_code executes stateful Python Code Runs in the selected Sandbox. Variables and imports persist in the Code Context, and display outputs are auto-promoted to Artifacts when possible. Oversized, unsafe, or unsupported outputs are reported as rejected outputs.",
+  "MCP tools currently do not accept caller-provided idempotency keys. For exact replay semantics across retry-sensitive mutations, route that step through the CLI or SDK idempotency-key options.",
+  "Use get_usage for current compute, credit, quota, and MCP-session Sandbox state. Use list_sandboxes for account-visible live Sandboxes.",
+  "For the full capability map and retry/idempotency patterns, see https://crownest.dev/docs/api/capabilities and https://crownest.dev/docs/guides/agent-patterns.",
+].join("\n\n");
+
+export function createCrowNestMcpServer(version: string): McpServer {
+  return new McpServer(
+    {
+      name: "@crownest/mcp",
+      version,
+    },
+    { instructions: CROWNEST_MCP_INSTRUCTIONS },
+  );
+}
+
+export function helpText(version: string): string {
+  return [
+    `@crownest/mcp ${version}`,
+    "",
+    "Usage:",
+    "  crownest-mcp",
+    "",
+    "Environment:",
+    "  CROWNEST_API_KEY   CrowNest API key",
+    "  CROWNEST_API_URL   CrowNest API URL (default: https://api.crownest.dev)",
+  ].join("\n");
 }
 
 function readPackageVersion(): string {

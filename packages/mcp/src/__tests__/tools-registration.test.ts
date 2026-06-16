@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  apiKeyIdSchema,
+  artifactIdSchema,
+  codeContextIdSchema,
+  commandIdSchema,
+  previewIdSchema,
+  sandboxIdSchema,
+} from "../tools/shared";
 import { createHarness } from "./mcp-test-helpers";
 
 const toolNames = [
@@ -11,22 +19,41 @@ const toolNames = [
   "read_file",
   "list_files",
   "download_artifact",
+  "list_sandboxes",
+  "get_usage",
+  "get_sandbox",
+  "extend_sandbox",
+  "get_command",
+  "cancel_command",
+  "stream_command_logs",
+  "delete_file",
+  "move_file",
+  "make_directory",
+  "stat_file",
+  "create_artifact",
+  "list_artifacts",
+  "get_artifact",
+  "delete_artifact",
+  "create_preview",
+  "list_previews",
+  "get_preview",
+  "revoke_preview",
+  "list_code_contexts",
+  "get_code_context",
+  "list_api_keys",
+  "revoke_api_key",
+  "create_project",
 ];
 
 describe("registerCrowNestTools", () => {
-  it("registers exactly the eight v1 tools with CrowNest descriptions", () => {
+  it("registers the SDK parity tools with CrowNest descriptions", () => {
     const { calls, tools } = createHarness();
 
     expect(calls.map((call) => call.name)).toEqual(toolNames);
-    expect(calls).toHaveLength(8);
-    expect(new Set(calls.map((call) => call.name)).size).toBe(8);
+    expect(calls).toHaveLength(32);
+    expect(new Set(calls.map((call) => call.name)).size).toBe(32);
     expect([...tools.keys()]).toEqual(toolNames);
-    expect(tools.get("run_code")?.config.description).toContain("Sandbox");
-    expect(tools.get("run_code")?.config.description).toContain("/workspace");
-    expect(tools.get("run_code")?.config.description).toContain(
-      "variables/imports persist",
-    );
-    expect(tools.get("download_artifact")?.config.description).toContain("Artifact");
+    expectPromptNativeDescriptions(tools);
   });
 
   it("accepts empty arguments for all-optional tools", () => {
@@ -34,8 +61,100 @@ describe("registerCrowNestTools", () => {
 
     expect(parseToolInput(tools, "create_sandbox", {})).toEqual({});
     expect(parseToolInput(tools, "list_files", {})).toEqual({});
+    expect(parseToolInput(tools, "list_sandboxes", {})).toEqual({});
+    expect(parseToolInput(tools, "get_sandbox", {})).toEqual({});
+    expect(parseToolInput(tools, "get_usage", {})).toEqual({});
+    expect(parseToolInput(tools, "list_artifacts", {})).toEqual({});
+    expect(parseToolInput(tools, "list_previews", {})).toEqual({});
+    expect(parseToolInput(tools, "list_code_contexts", {})).toEqual({});
+    expect(parseToolInput(tools, "list_api_keys", {})).toEqual({});
+  });
+
+  it("rejects MCP inputs outside the reachable API surface", () => {
+    const { tools } = createHarness();
+
+    expect(
+      rejectsToolInput(tools, "stream_command_logs", {
+        command_id: "cmd_123",
+        max_lines: 100,
+      }),
+    ).toBe(true);
+    expect(
+      rejectsToolInput(tools, "list_sandboxes", {
+        status: "destroyed",
+      }),
+    ).toBe(true);
+    expect(
+      rejectsToolInput(tools, "list_sandboxes", {
+        status: "failed",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects path-like resource IDs before SDK URL construction", () => {
+    const schemaCases = [
+      [sandboxIdSchema, "sbx_valid-123", "sbx_x/../../previews/prv_live"],
+      [commandIdSchema, "cmd_valid-123", "cmd_x/../../sandboxes/sbx_live"],
+      [artifactIdSchema, "art_valid-123", "art_x?path=/v1/sandboxes/sbx_live"],
+      [previewIdSchema, "prv_valid-123", "prv_x/../../sandboxes/sbx_live"],
+      [codeContextIdSchema, "cctx_valid-123", "cctx_x#fragment"],
+      [apiKeyIdSchema, "key_valid-123", "key_x%2F..%2Fsandboxes%2Fsbx_live"],
+    ] as const;
+
+    for (const [schema, validId, invalidId] of schemaCases) {
+      expect(schema.safeParse(validId).success).toBe(true);
+      expect(schema.safeParse(invalidId).success).toBe(false);
+    }
   });
 });
+
+function expectPromptNativeDescriptions(
+  tools: ReadonlyMap<string, { readonly config: { readonly description?: string } }>,
+): void {
+  expectDescription(tools, "run_code", [
+    "Omit sandbox_id",
+    "/workspace",
+    "variables/imports persist",
+    "auto-promote to Artifacts",
+    "rejected outputs",
+  ]);
+  expectDescription(tools, "run_command", ["default Sandbox", "/workspace"]);
+  expectDescription(tools, "create_sandbox", [
+    "without changing the lazy default Sandbox",
+    "MCP session exit cleanup",
+  ]);
+  expectDescription(tools, "extend_sandbox", [
+    "resetting its Sandbox TTL from now",
+    "cannot be revived",
+  ]);
+  expectDescription(tools, "get_usage", [
+    "compute usage",
+    "quotas",
+    "MCP-session Sandbox state",
+    "does not create or mutate Sandboxes",
+  ]);
+  expectDescription(tools, "download_artifact", ["durable CrowNest Artifact"]);
+  expectDescription(tools, "create_preview", [
+    "Token auth mode",
+    "one-time Preview token",
+    "public unauthenticated Preview URLs are not supported",
+  ]);
+  expect(tools.get("list_api_keys")?.config.description).toContain(
+    "Secret key values are never returned",
+  );
+}
+
+function expectDescription(
+  tools: ReadonlyMap<string, { readonly config: { readonly description?: string } }>,
+  name: string,
+  expected: readonly string[],
+): void {
+  const description = tools.get(name)?.config.description ?? "";
+
+  for (const value of expected) {
+    expect(description).toContain(value);
+  }
+}
 
 function parseToolInput(
   tools: ReadonlyMap<string, { readonly config: { readonly inputSchema?: unknown } }>,
@@ -53,6 +172,19 @@ function parseToolInput(
   }
 
   return result.data;
+}
+
+function rejectsToolInput(
+  tools: ReadonlyMap<string, { readonly config: { readonly inputSchema?: unknown } }>,
+  name: string,
+  input: unknown,
+): boolean {
+  const schema = tools.get(name)?.config.inputSchema;
+  if (!isSafeParsableSchema(schema)) {
+    throw new Error(`Tool ${name} does not expose a parsable input schema.`);
+  }
+
+  return !schema.safeParse(input).success;
 }
 
 function isSafeParsableSchema(

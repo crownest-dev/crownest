@@ -141,6 +141,21 @@ describe("McpSession explicit Sandboxes", () => {
     expect(client.mocks.createSandbox).toHaveBeenCalledTimes(2);
   });
 
+  it("reports tracked Sandbox ids and the lazy default id", async () => {
+    const explicit = createSandboxHandle("sbx_explicit");
+    const defaultSandbox = createSandboxHandle("sbx_default");
+    const client = createClient([explicit, defaultSandbox]);
+    const session = new McpSession({ apiKey: "cn_test", client });
+
+    await session.createSandbox();
+    await session.resolveSandbox();
+
+    expect(session.snapshot()).toEqual({
+      defaultSandboxId: "sbx_default",
+      sandboxIds: ["sbx_explicit", "sbx_default"],
+    });
+  });
+
   it("best-effort kills all tracked Sandboxes during cleanup", async () => {
     const first = createSandboxHandle("sbx_first");
     const second = createSandboxHandle("sbx_second");

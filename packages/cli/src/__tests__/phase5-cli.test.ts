@@ -11,7 +11,6 @@ describe("Phase 5 CLI ergonomics", () => {
   registerHumanKeyCliTests();
   registerProjectCliTests();
   registerUploadCliTests();
-  registerExecAliasTests();
 });
 
 function registerHumanCliTests() {
@@ -79,7 +78,10 @@ function registerHumanKeyCliTests() {
       fetchMock,
     );
 
-    expect(result).toMatchObject({ exitCode: 0, stdout: "cn_live_created\n" });
+    expect(result).toMatchObject({
+      exitCode: 0,
+      stdout: "secret: cn_live_created\n",
+    });
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.test/v1/api-keys");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
@@ -116,7 +118,10 @@ function registerHumanKeyCliTests() {
       fetchMock,
     );
 
-    expect(result).toMatchObject({ exitCode: 0, stdout: "cn_live_created\n" });
+    expect(result).toMatchObject({
+      exitCode: 0,
+      stdout: "secret: cn_live_created\n",
+    });
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:8787/v1/api-keys");
   });
 
@@ -181,7 +186,7 @@ function registerUploadCliTests() {
       fetchMock,
     );
 
-    expect(result.stdout).toBe("/workspace/input.bin\n");
+    expect(result.stdout).toContain("path: /workspace/input.bin");
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://api.test/v1/sandboxes/sbx_123/files",
     );
@@ -192,34 +197,20 @@ function registerUploadCliTests() {
       path: "/workspace/input.bin",
     });
   });
-}
 
-function registerExecAliasTests() {
-  it("aliases exec to command run with collection options", async () => {
+  it("defaults uploaded file destinations to the local basename", async () => {
+    const localPath = resolve(
+      mkdtempSync(resolve(tmpdir(), "crownest-cli-upload-")),
+      "input.bin",
+    );
+    writeFileSync(localPath, Buffer.from([0, 1, 2, 3]));
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
       jsonResponse({
-        command: {
-          collectStatus: "pending",
-          command: "python script.py",
-          cwd: "/workspace",
-          env: {},
-          id: "cmd_123",
-          sandboxId: "sbx_123",
-          status: "running",
-        },
+        file: { path: "input.bin", sizeBytes: 4, type: "file" },
       }),
     );
-
-    await runCli(
-      [
-        "exec",
-        "sbx_123",
-        "--collect",
-        "/workspace/output.csv",
-        "--",
-        "python",
-        "script.py",
-      ],
+    const result = await runCli(
+      ["files", "upload", "sbx_123", localPath],
       {
         CROWNEST_API_KEY: "cn_live_test",
         CROWNEST_API_URL: "https://api.test",
@@ -227,15 +218,10 @@ function registerExecAliasTests() {
       fetchMock,
     );
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://api.test/v1/sandboxes/sbx_123/commands/run",
-    );
-    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
-      JSON.stringify({
-        command: "python script.py",
-        collect: [{ path: "/workspace/output.csv" }],
-      }),
-    );
+    expect(result.stdout).toContain("path: input.bin");
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      path: "input.bin",
+    });
   });
 }
 

@@ -32,6 +32,38 @@ export function registerRunCode(server: McpServer, session: McpSession): void {
   );
 }
 
+export function registerCreateCodeContext(
+  server: McpServer,
+  session: McpSession,
+): void {
+  server.registerTool(
+    "create_code_context",
+    {
+      description:
+        "Create a CrowNest Code Context in a Sandbox for persisted interpreter state. Omit sandbox_id to lazily create or reuse the MCP session's default Sandbox; pass sandbox_id to target and adopt a visible Sandbox.",
+      inputSchema: z.object({
+        cwd: z.string().optional(),
+        language: z.enum(["python", "javascript", "typescript"]).optional(),
+        sandbox_id: sandboxIdSchema.optional(),
+        timeout_ms: z.number().int().positive().optional(),
+      }),
+    },
+    (input) =>
+      handleTool(async () => {
+        const sandbox = await session.resolveSandbox(
+          input.sandbox_id as `sbx_${string}` | undefined,
+        );
+        return formatCodeContext(
+          await sandbox.code.createContext({
+            ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+            ...(input.language === undefined ? {} : { language: input.language }),
+            ...(input.timeout_ms === undefined ? {} : { timeoutMs: input.timeout_ms }),
+          }),
+        );
+      }),
+  );
+}
+
 export function registerListCodeContexts(server: McpServer, session: McpSession): void {
   server.registerTool(
     "list_code_contexts",
@@ -70,6 +102,32 @@ export function registerGetCodeContext(server: McpServer, session: McpSession): 
         );
         return formatCodeContext(
           await sandbox.code.getContext(input.code_context_id as `cctx_${string}`),
+        );
+      }),
+  );
+}
+
+export function registerDeleteCodeContext(
+  server: McpServer,
+  session: McpSession,
+): void {
+  server.registerTool(
+    "delete_code_context",
+    {
+      description:
+        "Delete a live CrowNest Code Context in a Sandbox. Pass sandbox_id or omit sandbox_id to lazily create or reuse the current default Sandbox; deleted contexts cannot be reused by run_code.",
+      inputSchema: z.object({
+        code_context_id: codeContextIdSchema,
+        sandbox_id: sandboxIdSchema.optional(),
+      }),
+    },
+    (input) =>
+      handleTool(async () => {
+        const sandbox = await session.resolveSandbox(
+          input.sandbox_id as `sbx_${string}` | undefined,
+        );
+        return formatCodeContext(
+          await sandbox.code.deleteContext(input.code_context_id as `cctx_${string}`),
         );
       }),
   );

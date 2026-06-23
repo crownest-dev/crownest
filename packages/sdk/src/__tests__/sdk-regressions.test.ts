@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createCrowNestClient } from "../index";
 
 describe("SDK regression coverage", () => {
+  registerSandboxByteRegressionTests();
+  registerCommandLogRegressionTests();
+  registerWorkspaceRunRegressionTests();
+});
+
+function registerSandboxByteRegressionTests() {
   it("keeps sandbox handle byte helpers usable when extracted", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -37,7 +43,9 @@ describe("SDK regression coverage", () => {
       "https://api.test/v1/sandboxes/sbx_123/files/read?path=%2Fworkspace%2Fblob.bin&encoding=base64",
     );
   });
+}
 
+function registerCommandLogRegressionTests() {
   it("reconnects command log streams after clean EOF before terminal", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation((input) => {
       const path = requestUrl(input);
@@ -68,7 +76,40 @@ describe("SDK regression coverage", () => {
       "https://api.test/v1/commands/cmd_123/stream?afterSeq=1",
     ]);
   });
-});
+}
+
+function registerWorkspaceRunRegressionTests() {
+  it("reconnects workspace run event streams from the last seen sequence", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const path = requestUrl(input);
+      if (path.endsWith("/v1/workspace-runs/wsr_123/events?stream=true")) {
+        return Promise.resolve(erroringWorkspaceRunStreamResponse());
+      }
+      if (path.endsWith("/v1/workspace-runs/wsr_123/events?afterSeq=1&stream=true")) {
+        return Promise.resolve(reconnectedWorkspaceRunStreamResponse());
+      }
+      return Promise.reject(new Error(`unexpected URL ${path}`));
+    });
+    const client = createCrowNestClient({
+      apiKey: "cn_live_test",
+      baseUrl: "https://api.test",
+      fetch: fetchMock,
+    });
+    const events = [];
+
+    for await (const event of client.workspaceRuns.streamEvents("wsr_123")) {
+      events.push(event);
+    }
+
+    expect(
+      events.map((event) => (event.type === "terminal" ? event.type : event.seq)),
+    ).toEqual([1, 2, "terminal"]);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.test/v1/workspace-runs/wsr_123/events?stream=true",
+      "https://api.test/v1/workspace-runs/wsr_123/events?afterSeq=1&stream=true",
+    ]);
+  });
+}
 
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") {
@@ -85,8 +126,8 @@ function sandboxBody() {
     orgId: "org_123",
     projectId: "prj_123",
     status: "ready",
-    templateId: "tpl_python",
-    templateSlug: "python",
+    templateId: "tpl_python_node",
+    templateSlug: "python-node",
     templateVersion: "2026-06-01",
     templateVersionId: "tplv_123",
     ttlMs: 3_600_000,
@@ -115,6 +156,57 @@ function reconnectedCommandStreamResponse(): Response {
     ].join("\n"),
     { headers: { "content-type": "text/event-stream" } },
   );
+}
+
+function erroringWorkspaceRunStreamResponse(): Response {
+  let sent = false;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) {
+          throw new Error("network reset");
+        }
+        sent = true;
+        controller.enqueue(
+          new TextEncoder().encode(
+            'data: {"type":"status","seq":1,"status":"running","createdAt":"now"}\n\n',
+          ),
+        );
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+function reconnectedWorkspaceRunStreamResponse(): Response {
+  return new Response(
+    [
+      'data: {"type":"stdout","seq":2,"data":"again\\n","createdAt":"now"}',
+      "",
+      `data: ${JSON.stringify({
+        createdAt: "now",
+        seq: 3,
+        type: "terminal",
+        workspaceRun: workspaceRunBody(),
+      })}`,
+      "",
+      "",
+    ].join("\n"),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+function workspaceRunBody() {
+  return {
+    command: "pnpm test",
+    createdAt: "now",
+    id: "wsr_123",
+    metadata: {},
+    orchestrationSucceeded: true,
+    projectId: "prj_123",
+    status: "succeeded",
+    template: "python-node",
+  };
 }
 
 function terminalCommand() {

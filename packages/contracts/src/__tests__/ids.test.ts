@@ -6,7 +6,9 @@ describe("resource IDs", () => {
   it("accepts canonical CrowNest public ID prefixes", () => {
     expect(isResourceId("prj_123")).toBe(true);
     expect(isResourceId("sbx_123")).toBe(true);
+    expect(isResourceId("wsr_123")).toBe(true);
     expect(ResourceIdPrefix.Project).toBe("prj");
+    expect(ResourceIdPrefix.WorkspaceRun).toBe("wsr");
   });
 
   it("rejects unknown or incomplete IDs", () => {

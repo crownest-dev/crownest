@@ -6,19 +6,28 @@ import {
   codeContextIdSchema,
   commandIdSchema,
   previewIdSchema,
+  projectIdSchema,
   sandboxIdSchema,
+  workspaceRunIdSchema,
+  workspaceRunUploadIdSchema,
 } from "../tools/shared";
 import { createHarness } from "./mcp-test-helpers";
 
 const toolNames = [
   "run_code",
+  "get_agent_context",
   "run_command",
+  "start_command",
   "create_sandbox",
   "kill_sandbox",
   "write_file",
+  "write_file_bytes",
   "read_file",
+  "read_file_bytes",
+  "get_file_download_url",
   "list_files",
   "download_artifact",
+  "get_artifact_download_url",
   "list_sandboxes",
   "get_usage",
   "get_sandbox",
@@ -38,11 +47,26 @@ const toolNames = [
   "list_previews",
   "get_preview",
   "revoke_preview",
+  "create_code_context",
   "list_code_contexts",
   "get_code_context",
+  "delete_code_context",
   "list_api_keys",
+  "get_api_key",
   "revoke_api_key",
   "create_project",
+  "list_projects",
+  "create_workspace_run",
+  "upload_workspace_run_archive",
+  "create_workspace_run_archive_transfer",
+  "upload_workspace_run_archive_transfer",
+  "finalize_workspace_run_archive",
+  "start_workspace_run",
+  "get_workspace_run",
+  "list_workspace_runs",
+  "replay_workspace_run_events",
+  "cancel_workspace_run",
+  "get_workspace_run_evidence",
 ];
 
 describe("registerCrowNestTools", () => {
@@ -50,8 +74,8 @@ describe("registerCrowNestTools", () => {
     const { calls, tools } = createHarness();
 
     expect(calls.map((call) => call.name)).toEqual(toolNames);
-    expect(calls).toHaveLength(32);
-    expect(new Set(calls.map((call) => call.name)).size).toBe(32);
+    expect(calls).toHaveLength(53);
+    expect(new Set(calls.map((call) => call.name)).size).toBe(53);
     expect([...tools.keys()]).toEqual(toolNames);
     expectPromptNativeDescriptions(tools);
   });
@@ -60,6 +84,7 @@ describe("registerCrowNestTools", () => {
     const { tools } = createHarness();
 
     expect(parseToolInput(tools, "create_sandbox", {})).toEqual({});
+    expect(parseToolInput(tools, "get_agent_context", {})).toEqual({});
     expect(parseToolInput(tools, "list_files", {})).toEqual({});
     expect(parseToolInput(tools, "list_sandboxes", {})).toEqual({});
     expect(parseToolInput(tools, "get_sandbox", {})).toEqual({});
@@ -68,6 +93,8 @@ describe("registerCrowNestTools", () => {
     expect(parseToolInput(tools, "list_previews", {})).toEqual({});
     expect(parseToolInput(tools, "list_code_contexts", {})).toEqual({});
     expect(parseToolInput(tools, "list_api_keys", {})).toEqual({});
+    expect(parseToolInput(tools, "list_projects", {})).toEqual({});
+    expect(parseToolInput(tools, "list_workspace_runs", {})).toEqual({});
   });
 
   it("rejects MCP inputs outside the reachable API surface", () => {
@@ -99,6 +126,13 @@ describe("registerCrowNestTools", () => {
       [previewIdSchema, "prv_valid-123", "prv_x/../../sandboxes/sbx_live"],
       [codeContextIdSchema, "cctx_valid-123", "cctx_x#fragment"],
       [apiKeyIdSchema, "key_valid-123", "key_x%2F..%2Fsandboxes%2Fsbx_live"],
+      [projectIdSchema, "prj_valid-123", "prj_x/../../sandboxes/sbx_live"],
+      [workspaceRunIdSchema, "wsr_valid-123", "wsr_x?events=true"],
+      [
+        workspaceRunUploadIdSchema,
+        "upl_valid-123",
+        "upl_x/../../workspace-runs/wsr_live",
+      ],
     ] as const;
 
     for (const [schema, validId, invalidId] of schemaCases) {
@@ -118,7 +152,9 @@ function expectPromptNativeDescriptions(
     "auto-promote to Artifacts",
     "rejected outputs",
   ]);
+  expectDescription(tools, "get_agent_context", ["bounded CrowNest agent context"]);
   expectDescription(tools, "run_command", ["default Sandbox", "/workspace"]);
+  expectDescription(tools, "start_command", ["without waiting", "get_command"]);
   expectDescription(tools, "create_sandbox", [
     "without changing the lazy default Sandbox",
     "MCP session exit cleanup",
@@ -134,6 +170,7 @@ function expectPromptNativeDescriptions(
     "does not create or mutate Sandboxes",
   ]);
   expectDescription(tools, "download_artifact", ["durable CrowNest Artifact"]);
+  expectDescription(tools, "get_artifact_download_url", ["short-lived"]);
   expectDescription(tools, "create_preview", [
     "Token auth mode",
     "one-time Preview token",
@@ -141,6 +178,12 @@ function expectPromptNativeDescriptions(
   ]);
   expect(tools.get("list_api_keys")?.config.description).toContain(
     "Secret key values are never returned",
+  );
+  expect(tools.get("create_workspace_run")?.config.description).toContain(
+    "Evidence Bundles",
+  );
+  expect(tools.get("replay_workspace_run_events")?.config.description).toContain(
+    "bounded page",
   );
 }
 

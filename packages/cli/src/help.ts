@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- Canonical help text lists every CLI command. */
+
 import { CLI_EXIT_API_ERROR, CLI_EXIT_OK, CLI_EXIT_USAGE_ERROR } from "./exit-codes";
 import type { CanonicalCliCommand } from "./index";
 
@@ -18,6 +20,11 @@ const jsonFlag = {
 const streamingJsonFlag = {
   flag: "--json",
   description: "Accepted for consistency; streamed output remains raw.",
+} as const;
+
+const streamEventsJsonFlag = {
+  flag: "--json",
+  description: "Print each streamed event as a JSON envelope.",
 } as const;
 
 export const cliCommandHelp = {
@@ -136,6 +143,20 @@ export const cliCommandHelp = {
         flag: "--bash",
         description: "Run each line as an independent shell command.",
       },
+    ],
+  },
+  "skills install": {
+    summary: "Install the bundled CrowNest Agent Skill.",
+    usage:
+      "crownest skills install [--scope user|project] [--force] [--dry-run] [--json]",
+    flags: [
+      {
+        flag: "--scope",
+        description: "Install location: user or project. Defaults to user.",
+      },
+      { flag: "--force", description: "Replace an existing installed skill." },
+      { flag: "--dry-run", description: "Print the destination without writing." },
+      jsonFlag,
     ],
   },
   "code run": {
@@ -258,6 +279,83 @@ export const cliCommandHelp = {
     usage: "crownest previews revoke <preview-id> [--json]",
     flags: [jsonFlag],
   },
+  "workspace-runs create": {
+    summary: "Create a Workspace Run record.",
+    usage:
+      "crownest workspace-runs create --command <command> [--project <prj_id>] [--template <slug>] [--sandbox <sbx_id>] [--keep-sandbox] [--timeout-ms <ms>] [--metadata key=value]... [--json]",
+    flags: [
+      { flag: "--command", description: "Shell command to run after archive upload." },
+      { flag: "--project", description: "Project to create the run in." },
+      { flag: "--template", description: "Template slug such as python-node." },
+      { flag: "--sandbox", description: "Warm sandbox to reuse." },
+      { flag: "--keep-sandbox", description: "Keep the sandbox after the run." },
+      { flag: "--timeout-ms", description: "Command timeout in milliseconds." },
+      { flag: "--metadata", description: "Metadata label as key=value. Repeatable." },
+      jsonFlag,
+    ],
+  },
+  "workspace-runs upload": {
+    summary: "Upload an existing gzipped tar archive to a Workspace Run.",
+    usage:
+      "crownest workspace-runs upload <workspace-run-id> <archive.tgz> [--sha256 <hex>] [--json]",
+    flags: [{ flag: "--sha256", description: "Expected SHA-256 checksum." }, jsonFlag],
+  },
+  "workspace-runs start": {
+    summary: "Start extraction and command execution for an uploaded Workspace Run.",
+    usage: "crownest workspace-runs start <workspace-run-id> [--json]",
+    flags: [jsonFlag],
+  },
+  "workspace-runs run-archive": {
+    summary: "Upload an existing archive, start the run, and stream output.",
+    usage:
+      "crownest workspace-runs run-archive <archive.tgz> [--project <prj_id>] [--template <slug>] [--sandbox <sbx_id>] [--keep-sandbox] [--timeout-ms <ms>] [--metadata key=value]... [--json] -- <command>",
+    flags: [
+      { flag: "--project", description: "Project to create the run in." },
+      { flag: "--template", description: "Template slug such as python-node." },
+      { flag: "--sandbox", description: "Warm sandbox to reuse." },
+      { flag: "--keep-sandbox", description: "Keep the sandbox after the run." },
+      { flag: "--timeout-ms", description: "Command timeout in milliseconds." },
+      { flag: "--metadata", description: "Metadata label as key=value. Repeatable." },
+      streamEventsJsonFlag,
+    ],
+  },
+  "workspace-runs status": {
+    summary: "Retrieve Workspace Run status.",
+    usage: "crownest workspace-runs status <workspace-run-id> [--json]",
+    flags: [jsonFlag],
+  },
+  "workspace-runs list": {
+    summary: "List Workspace Runs.",
+    usage:
+      "crownest workspace-runs list [--project <prj_id>] [--status <status>] [--json]",
+    flags: [
+      { flag: "--project", description: "Filter by project." },
+      { flag: "--status", description: "Filter by Workspace Run status." },
+      jsonFlag,
+    ],
+  },
+  "workspace-runs logs": {
+    summary: "Stream Workspace Run events.",
+    usage: "crownest workspace-runs logs <workspace-run-id> [--after-seq <n>] [--json]",
+    flags: [
+      { flag: "--after-seq", description: "Resume after an event sequence." },
+      streamEventsJsonFlag,
+    ],
+  },
+  "workspace-runs cancel": {
+    summary: "Cancel an active Workspace Run.",
+    usage: "crownest workspace-runs cancel <workspace-run-id> [--json]",
+    flags: [jsonFlag],
+  },
+  "workspace-runs evidence": {
+    summary: "Read durable Workspace Run evidence.",
+    usage:
+      "crownest workspace-runs evidence <workspace-run-id> [--output <path>] [--json]",
+    flags: [
+      { flag: "--output", description: "Write evidence JSON to a local path." },
+      jsonFlag,
+    ],
+  },
 } as const satisfies Record<CanonicalCliCommand, CommandHelp>;
 
 export function helpOutput(argv: readonly string[]): string | undefined {
@@ -337,3 +435,5 @@ function exitCodeHelp(): readonly string[] {
 function isHelpToken(value: string | undefined): boolean {
   return value === "--help" || value === "-h";
 }
+
+/* eslint-enable max-lines -- End canonical CLI help table. */

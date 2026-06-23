@@ -11,7 +11,7 @@ export CROWNEST_API_KEY="cn_live_..."
 from crownest import CrowNest
 
 with CrowNest() as client:
-    sandbox = client.sandboxes.create(template="python", ttl_ms=60 * 60_000)
+    sandbox = client.sandboxes.create(template="python-node", ttl_ms=60 * 60_000)
     sandbox.files.write(
         "/workspace/main.py",
         "from pathlib import Path\nPath('/workspace/output.txt').write_text('hello')\n",

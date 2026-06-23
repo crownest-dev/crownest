@@ -23,6 +23,28 @@ describe("run_command", () => {
     expect(text(result)).toContain("stdout:\n");
     expect(text(result)).toContain("stderr:\n");
   });
+
+  it("starts Commands without waiting for completion", async () => {
+    const sandbox = createSandboxHandle("sbx_command");
+    sandbox.mocks.commandStart.mockResolvedValueOnce({
+      ...commandResult("sbx_command"),
+      status: "running",
+    });
+    const { tools } = createHarness([sandbox]);
+
+    const result = await callTool(tools, "start_command", {
+      command: "pnpm test",
+      cwd: "/workspace/app",
+      timeout_ms: 500,
+    });
+
+    expect(sandbox.mocks.commandStart).toHaveBeenCalledWith("pnpm test", {
+      cwd: "/workspace/app",
+      timeoutMs: 500,
+    });
+    expect(text(result)).toContain('"command_id": "cmd_123"');
+    expect(text(result)).toContain('"status": "running"');
+  });
 });
 
 describe("Workspace read/write tools", () => {
@@ -46,6 +68,42 @@ describe("Workspace read/write tools", () => {
     expect(sandbox.mocks.fileList).toHaveBeenCalledWith("/workspace");
     expect(text(read)).toContain('"content": "hello"');
     expect(text(list)).toContain('"sandbox_id": "sbx_files"');
+  });
+
+  it("writes, reads, and links binary Workspace files", async () => {
+    const sandbox = createSandboxHandle("sbx_files");
+    sandbox.mocks.fileWriteBytes.mockResolvedValueOnce(fileStat());
+    sandbox.mocks.fileReadBytes.mockResolvedValueOnce(new Uint8Array([104, 105]));
+    sandbox.mocks.fileDownloadUrl.mockResolvedValueOnce({
+      authMode: "api_key",
+      method: "GET",
+      url: "https://api.test/download",
+    });
+    const { tools } = createHarness([sandbox]);
+
+    const written = await callTool(tools, "write_file_bytes", {
+      content_base64: "aGk=",
+      create_parents: true,
+      overwrite: true,
+      path: "/workspace/a.bin",
+    });
+    const read = await callTool(tools, "read_file_bytes", {
+      path: "/workspace/a.bin",
+    });
+    const url = await callTool(tools, "get_file_download_url", {
+      path: "/workspace/a.bin",
+    });
+
+    expect(sandbox.mocks.fileWriteBytes).toHaveBeenCalledWith(
+      "/workspace/a.bin",
+      Buffer.from("aGk=", "base64"),
+      { createParents: true, overwrite: true },
+    );
+    expect(sandbox.mocks.fileReadBytes).toHaveBeenCalledWith("/workspace/a.bin");
+    expect(sandbox.mocks.fileDownloadUrl).toHaveBeenCalledWith("/workspace/a.bin");
+    expect(text(written)).toContain('"sandbox_id": "sbx_files"');
+    expect(text(read)).toContain('"content_base64": "aGk="');
+    expect(text(url)).toContain('"url": "https://api.test/download"');
   });
 });
 

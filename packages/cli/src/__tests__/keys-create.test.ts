@@ -3,7 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { runCli } from "../index";
 
 describe("keys create", () => {
-  it("includes code execution in the default Quickstart Developer scopes", async () => {
+  registerDefaultScopeTests();
+  registerExplicitScopeTests();
+  registerErrorTests();
+});
+
+function registerDefaultScopeTests() {
+  it("includes code execution and Workspace Runs in the default Quickstart Developer scopes", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
       jsonResponse({
         secret: "cn_live_created",
@@ -24,8 +30,13 @@ describe("keys create", () => {
     expect(body.name).toBe("Quickstart Developer");
     expect(body.scopes).toContain("command:run");
     expect(body.scopes).toContain("code:run");
+    expect(body.scopes).toContain("workspace_run:create");
+    expect(body.scopes).toContain("workspace_run:read");
+    expect(body.scopes).toContain("workspace_run:cancel");
   });
+}
 
+function registerExplicitScopeTests() {
   it("accepts code:run as an explicit API key scope", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
       jsonResponse({
@@ -44,6 +55,35 @@ describe("keys create", () => {
     });
   });
 
+  it("accepts Workspace Run scopes as explicit API key scopes", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      jsonResponse({
+        secret: "cn_live_created",
+      }),
+    );
+    const result = await runCli(
+      [
+        "keys",
+        "create",
+        "--scope",
+        "workspace_run:create",
+        "--scope",
+        "workspace_run:read",
+        "--scope",
+        "workspace_run:cancel",
+      ],
+      humanEnvironment(),
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(requestBody(fetchMock)).toMatchObject({
+      scopes: ["workspace_run:create", "workspace_run:read", "workspace_run:cancel"],
+    });
+  });
+}
+
+function registerErrorTests() {
   it("renders structured API errors", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
       new Response(
@@ -64,7 +104,7 @@ describe("keys create", () => {
     expect(result.stderr).toContain("status: 403");
     expect(result.stderr).toContain('"limit": 3');
   });
-});
+}
 
 function humanEnvironment() {
   return {

@@ -1,5 +1,10 @@
 export const ResourceIdPrefix = {
   ApiKey: "key",
+  AgentClaimAttempt: "aclaim",
+  AgentCredential: "acred",
+  AgentProvider: "agp",
+  AgentProviderBinding: "apbind",
+  AgentRegistration: "areg",
   Artifact: "art",
   Backup: "bkp",
   CodeContext: "cctx",
@@ -12,6 +17,7 @@ export const ResourceIdPrefix = {
   TemplateVersion: "tplv",
   Upload: "upl",
   User: "usr",
+  WorkspaceRun: "wsr",
 } as const;
 
 export type ResourceIdPrefix = (typeof ResourceIdPrefix)[keyof typeof ResourceIdPrefix];

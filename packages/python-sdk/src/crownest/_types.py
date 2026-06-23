@@ -24,11 +24,27 @@ CommandCancelMode = Literal["force", "graceful"]
 CommandCollectOn = Literal["always", "success"]
 CommandLogStream = Literal["stderr", "stdout"]
 PreviewAuthMode = Literal["authenticated", "token"]
+WorkspaceRunStatus = Literal[
+    "awaiting_archive",
+    "archive_uploaded",
+    "starting",
+    "extracting",
+    "running",
+    "collecting",
+    "succeeded",
+    "failed",
+    "canceled",
+]
 
 
 class CommandCollectRequest(TypedDict, total=False):
     path: str
     name: str
+
+
+class WorkspaceRunArtifactRequest(TypedDict):
+    path: str
+    name: NotRequired[str]
 
 
 class RunCommandOptions(TypedDict, total=False):

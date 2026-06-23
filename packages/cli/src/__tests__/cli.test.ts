@@ -1,7 +1,7 @@
 /* eslint-disable max-lines, max-lines-per-function -- CLI surface tests intentionally keep command fixtures in one file. */
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -15,7 +15,9 @@ describe("runCli", () => {
   registerCodeCliTests();
   registerFileArtifactCliTests();
   registerLogCliTests();
+  registerWorkspaceRunCliTests();
   registerBinTests();
+  registerSkillCliTests();
   registerUsageAndOutputTests();
 });
 
@@ -30,8 +32,8 @@ function registerSandboxCliTests() {
           orgId: "org_123",
           projectId: "prj_123",
           status: "ready",
-          templateId: "tpl_python",
-          templateSlug: "python",
+          templateId: "tpl_python_node",
+          templateSlug: "python-node",
           templateVersion: "2026-06-01",
           templateVersionId: "tplv_123",
           ttlMs: 3_600_000,
@@ -68,8 +70,8 @@ function registerSandboxExtendCliTests() {
           orgId: "org_123",
           projectId: "prj_123",
           status: "ready",
-          templateId: "tpl_python",
-          templateSlug: "python",
+          templateId: "tpl_python_node",
+          templateSlug: "python-node",
           templateVersion: "2026-06-01",
           templateVersionId: "tplv_123",
           ttlMs: 5_400_000,
@@ -217,6 +219,262 @@ function registerFileArtifactCliTests() {
   });
 }
 
+function registerWorkspaceRunCliTests() {
+  it("runs an existing archive through Workspace Runs and returns the remote exit code", async () => {
+    const archivePath = tempFile("repo.tgz", "fake archive");
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ workspaceRun: workspaceRunBody() }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          transfer: {
+            checksumAlgorithm: "sha256",
+            expiresAt: "2026-06-17T12:10:00.000Z",
+            headers: {
+              "content-length": "12",
+              "content-type": "application/gzip",
+            },
+            id: "upl_123",
+            maxSizeBytes: 1_000,
+            method: "PUT",
+            status: "pending",
+            uploadUrl:
+              "https://api.test/v1/workspace-runs/wsr_123/archive-transfer/upl_123",
+            workspaceRunId: "wsr_123",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          archive: { sha256: "sha", sizeBytes: 12 },
+          workspaceRun: { ...workspaceRunBody(), status: "archive_uploaded" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ workspaceRun: { ...workspaceRunBody(), status: "running" } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          [
+            'event: stdout\ndata: {"type":"stdout","seq":1,"data":"out\\n","createdAt":"2026-06-17T12:00:01.000Z"}',
+            "",
+            'event: terminal\ndata: {"type":"terminal","seq":2,"createdAt":"2026-06-17T12:00:02.000Z","workspaceRun":{"id":"wsr_123","status":"failed","command":"pnpm test","keepSandbox":false,"metadata":{},"orgId":"org_123","projectId":"prj_123","templateId":"tpl_python_node","templateSlug":"python-node","templateVersion":"2026-06-17","templateVersionId":"tplv_123","createdAt":"2026-06-17T12:00:00.000Z","exitCode":7}}',
+            "",
+          ].join("\n"),
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      );
+
+    const result = await runCli(
+      [
+        "workspace-runs",
+        "run-archive",
+        archivePath,
+        "--template",
+        "python-node",
+        "--",
+        "sh",
+        "-c",
+        "echo hi",
+      ],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(7);
+    expect(result.stdout).toBe("out\n");
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.test/v1/workspace-runs",
+      "https://api.test/v1/workspace-runs/wsr_123/archive-transfer",
+      "https://api.test/v1/workspace-runs/wsr_123/archive-transfer/upl_123",
+      "https://api.test/v1/workspace-runs/wsr_123/archive/finalize",
+      "https://api.test/v1/workspace-runs/wsr_123/start",
+      "https://api.test/v1/workspace-runs/wsr_123/events?stream=true",
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      command: "sh -c 'echo hi'",
+      template: "python-node",
+    });
+    const uploadHeaders = fetchMock.mock.calls[2]?.[1]?.headers;
+    expect(uploadHeaders).toBeInstanceOf(Headers);
+    expect((uploadHeaders as Headers).get("authorization")).toBe("Bearer cn_live_test");
+    expect((uploadHeaders as Headers).get("content-type")).toBe("application/gzip");
+    expect((uploadHeaders as Headers).get("content-length")).toBe("12");
+  });
+
+  it("fails run-archive when a terminal failure has no command exit code", async () => {
+    const archivePath = tempFile("repo.tgz", "fake archive");
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ workspaceRun: workspaceRunBody() }))
+      .mockResolvedValueOnce(jsonResponse({ transfer: workspaceRunTransferBody() }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          archive: { sha256: "sha", sizeBytes: 12 },
+          workspaceRun: { ...workspaceRunBody(), status: "archive_uploaded" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ workspaceRun: { ...workspaceRunBody(), status: "running" } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          'event: terminal\ndata: {"type":"terminal","seq":1,"createdAt":"2026-06-17T12:00:02.000Z","workspaceRun":{"id":"wsr_123","status":"failed","command":"pnpm test","keepSandbox":false,"metadata":{},"orgId":"org_123","projectId":"prj_123","templateId":"tpl_python_node","templateSlug":"python-node","templateVersion":"2026-06-17","templateVersionId":"tplv_123","createdAt":"2026-06-17T12:00:00.000Z"}}\n\n',
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      );
+
+    const result = await runCli(
+      ["workspace-runs", "run-archive", archivePath, "--", "pnpm", "test"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+  });
+
+  it("streams Workspace Run JSON events through the output sink", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          'event: stdout\ndata: {"type":"stdout","seq":1,"data":"out\\n","createdAt":"2026-06-17T12:00:01.000Z"}\n\n',
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      );
+    const stdoutWrite = vi.fn();
+    const result = await runCli(
+      ["workspace-runs", "logs", "wsr_123", "--json"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+      {
+        stderr: { write: vi.fn() },
+        stdout: { write: stdoutWrite },
+      },
+    );
+
+    expect(result.stdout).toBe("");
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      '{"data":{"type":"stdout","seq":1,"data":"out\\n","createdAt":"2026-06-17T12:00:01.000Z"}}\n',
+    );
+  });
+
+  it("fails run-archive when the stream ends before a terminal event", async () => {
+    const archivePath = tempFile("repo.tgz", "fake archive");
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ workspaceRun: workspaceRunBody() }))
+      .mockResolvedValueOnce(jsonResponse({ transfer: workspaceRunTransferBody() }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          archive: { sha256: "sha", sizeBytes: 12 },
+          workspaceRun: { ...workspaceRunBody(), status: "archive_uploaded" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ workspaceRun: { ...workspaceRunBody(), status: "running" } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          'event: stdout\ndata: {"type":"stdout","seq":1,"data":"partial\\n","createdAt":"2026-06-17T12:00:01.000Z"}\n\n',
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ workspaceRun: { ...workspaceRunBody(), status: "running" } }),
+      );
+
+    const result = await runCli(
+      ["workspace-runs", "run-archive", archivePath, "--", "pnpm", "test"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("partial\n");
+    expect(result.stderr).toBe(
+      "Workspace Run stream ended before terminal status (running).\n",
+    );
+  });
+
+  it("rejects directory inputs instead of packing local repos", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const result = await runCli(
+      ["workspace-runs", "upload", "wsr_123", mkdtempSync(resolve(tmpdir(), "cn-"))],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("archive path must be an existing .tar.gz file");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("downloads Workspace Run evidence without a live sandbox", async () => {
+    const outputPath = resolve(
+      mkdtempSync(resolve(tmpdir(), "crownest-evidence-")),
+      "evidence.json",
+    );
+    const evidence = {
+      workspaceRunId: "wsr_123",
+      orgId: "org_123",
+      projectId: "prj_123",
+      status: "succeeded",
+      artifactErrors: [],
+      artifactIds: [],
+      cleanupStatus: "succeeded",
+      command: "pnpm test",
+      createdAt: "2026-06-17T12:00:00.000Z",
+      envKeys: [],
+      metadata: {},
+      orchestrationSucceeded: true,
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      jsonResponse({
+        evidence,
+      }),
+    );
+
+    const result = await runCli(
+      ["workspace-runs", "evidence", "wsr_123", "--output", outputPath],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(`path: ${outputPath}`);
+    expect(JSON.parse(readFileSync(outputPath, "utf8"))).toMatchObject({
+      workspaceRunId: "wsr_123",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.test/v1/workspace-runs/wsr_123/evidence",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+}
+
 function registerBinTests() {
   it("advertises the built crownest binary for published installs", () => {
     const packageJson = JSON.parse(
@@ -234,9 +492,95 @@ function registerBinTests() {
 
     expect(packageJson.bin.crownest).toBe("./dist/index.js");
     expect(packageJson.files).toContain("dist");
+    expect(packageJson.files).toContain("skills");
     expect(sourceEntry).toContain("runCli");
     expect(packageJson.exports).toBeUndefined();
     expect("bin" in packageJson.publishConfig).toBe(false);
+  });
+}
+
+function registerSkillCliTests() {
+  it("installs the bundled skill for the current user", async () => {
+    const home = mkdtempSync(resolve(tmpdir(), "crownest-home-"));
+    const result = await runCli(["skills", "install"], { HOME: home });
+    const skillPath = join(home, ".agents/skills/crownest/SKILL.md");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("skill: crownest");
+    expect(existsSync(skillPath)).toBe(true);
+    expect(readFileSync(skillPath, "utf8")).toContain("name: crownest");
+  });
+
+  it("installs the bundled skill for a project", async () => {
+    const project = mkdtempSync(resolve(tmpdir(), "crownest-project-"));
+    const previousCwd = process.cwd();
+
+    try {
+      process.chdir(project);
+      const result = await runCli(["skills", "install", "--scope", "project"], {});
+
+      expect(result.exitCode).toBe(0);
+      expect(existsSync(join(project, ".agents/skills/crownest/SKILL.md"))).toBe(true);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it("does not overwrite an installed skill without force", async () => {
+    const home = mkdtempSync(resolve(tmpdir(), "crownest-home-"));
+
+    await runCli(["skills", "install"], { HOME: home });
+    const result = await runCli(["skills", "install"], { HOME: home });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("Use --force to replace it.");
+  });
+
+  it("replaces an installed skill with force", async () => {
+    const home = mkdtempSync(resolve(tmpdir(), "crownest-home-"));
+    const skillPath = join(home, ".agents/skills/crownest/SKILL.md");
+
+    await runCli(["skills", "install"], { HOME: home });
+    writeFileSync(skillPath, "stale\n");
+    const result = await runCli(["skills", "install", "--force"], { HOME: home });
+
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(skillPath, "utf8")).toContain("Use CrowNest");
+  });
+
+  it("previews skill installation without writing", async () => {
+    const home = mkdtempSync(resolve(tmpdir(), "crownest-home-"));
+    const result = await runCli(["skills", "install", "--dry-run", "--json"], {
+      HOME: home,
+    });
+    const payload = JSON.parse(result.stdout) as {
+      readonly data: { readonly destination: string; readonly dryRun: boolean };
+    };
+
+    expect(result.exitCode).toBe(0);
+    expect(payload.data.dryRun).toBe(true);
+    expect(existsSync(payload.data.destination)).toBe(false);
+  });
+
+  it("requires HOME for user skill installation", async () => {
+    const result = await runCli(["skills", "install"], {});
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("HOME is required");
+  });
+
+  it("ships a valid skill bundle", () => {
+    const skillRoot = resolve(import.meta.dirname, "../../skills/crownest");
+    const skill = readFileSync(join(skillRoot, "SKILL.md"), "utf8");
+
+    expect(skill).toContain("name: crownest");
+    expect(skill).toContain("description:");
+    expect(skill).toContain("references/agent-patterns.md");
+    expect(skill).toContain("references/capability-map.md");
+    expect(existsSync(join(skillRoot, "agents/openai.yaml"))).toBe(true);
+    expect(existsSync(join(skillRoot, "references/agent-patterns.md"))).toBe(true);
+    expect(existsSync(join(skillRoot, "references/capability-map.md"))).toBe(true);
   });
 }
 
@@ -982,8 +1326,8 @@ function registerUsageAndOutputTests() {
             orgId: "org_123",
             projectId: "prj_123",
             status: "ready",
-            templateId: "tpl_python",
-            templateSlug: "python",
+            templateId: "tpl_python_node",
+            templateSlug: "python-node",
             templateVersion: "2026-06-01",
             templateVersionId: "tplv_123",
             ttlMs: 3_600_000,
@@ -1042,6 +1386,47 @@ function jsonResponse(body: unknown): Response {
     headers: { "content-type": "application/json" },
     status: 200,
   });
+}
+
+function tempFile(name: string, content: string): string {
+  const path = resolve(mkdtempSync(resolve(tmpdir(), "crownest-cli-")), name);
+  writeFileSync(path, content);
+  return path;
+}
+
+function workspaceRunBody(overrides: Record<string, unknown> = {}) {
+  return {
+    command: "pnpm test",
+    createdAt: "2026-06-17T12:00:00.000Z",
+    id: "wsr_123",
+    keepSandbox: false,
+    metadata: {},
+    orgId: "org_123",
+    projectId: "prj_123",
+    status: "awaiting_archive",
+    templateId: "tpl_python_node",
+    templateSlug: "python-node",
+    templateVersion: "2026-06-17",
+    templateVersionId: "tplv_123",
+    ...overrides,
+  };
+}
+
+function workspaceRunTransferBody() {
+  return {
+    checksumAlgorithm: "sha256",
+    expiresAt: "2026-06-17T12:10:00.000Z",
+    headers: {
+      "content-length": "12",
+      "content-type": "application/gzip",
+    },
+    id: "upl_123",
+    maxSizeBytes: 1_000,
+    method: "PUT",
+    status: "pending",
+    uploadUrl: "https://api.test/v1/workspace-runs/wsr_123/archive-transfer/upl_123",
+    workspaceRunId: "wsr_123",
+  };
 }
 
 /* eslint-enable max-lines, max-lines-per-function -- End CLI surface fixture exception. */

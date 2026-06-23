@@ -318,12 +318,22 @@ export function formatApiKeyList(apiKeys: readonly ApiKeyMetadata[]): CallToolRe
 }
 
 export function formatProject(project: ProjectMetadata): CallToolResult {
-  return jsonTextResult({
+  return jsonTextResult(projectPayload(project));
+}
+
+export function formatProjectList(
+  projects: readonly ProjectMetadata[],
+): CallToolResult {
+  return jsonTextResult({ data: projects.map(projectPayload) });
+}
+
+function projectPayload(project: ProjectMetadata): Record<string, unknown> {
+  return {
     created_at: project.createdAt,
     name: project.name,
     org_id: project.orgId,
     project_id: project.id,
-  });
+  };
 }
 
 function textContent(text: string): TextContent {
@@ -349,11 +359,7 @@ function formatCodeOutputs(outputs: readonly CodeOutput[]): readonly string[] {
 }
 
 function formatInlineValue(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  return JSON.stringify(value);
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 function formatCodeError(error: NonNullable<CodeRunResult["error"]>): string {
@@ -438,18 +444,12 @@ function apiKeyPayload(apiKey: ApiKeyMetadata): Record<string, unknown> {
 }
 
 function formatTemplate(sandbox: SandboxMetadata): string | undefined {
-  if (sandbox.templateSlug === undefined) {
-    return undefined;
-  }
-
-  if (sandbox.templateVersion === undefined) {
-    return sandbox.templateSlug;
-  }
-
-  return `${sandbox.templateSlug}@${sandbox.templateVersion}`;
+  if (sandbox.templateSlug === undefined) return undefined;
+  return sandbox.templateVersion === undefined
+    ? sandbox.templateSlug
+    : `${sandbox.templateSlug}@${sandbox.templateVersion}`;
 }
 
 function splitLogLines(data: string): readonly string[] {
-  const lines = data.split(/\r?\n/u);
-  return lines.at(-1) === "" ? lines.slice(0, -1) : lines;
+  return data.replace(/\r?\n$/u, "").split(/\r?\n/u);
 }

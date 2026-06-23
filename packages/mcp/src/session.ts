@@ -4,6 +4,10 @@ import {
   type SandboxHandle,
 } from "@crownest/sdk";
 
+type WorkspaceRunArchiveTransfer = Awaited<
+  ReturnType<CrowNestClient["workspaceRuns"]["createArchiveTransfer"]>
+>;
+
 export type McpSessionConfig = {
   readonly apiKey: string;
   readonly baseUrl?: string;
@@ -29,7 +33,12 @@ export class McpSession {
   readonly client: CrowNestClient;
   private defaultSandboxId: `sbx_${string}` | undefined;
   private defaultSandboxCreation: Promise<SandboxHandle> | undefined;
+  private readonly ownedSandboxIds = new Set<`sbx_${string}`>();
   private readonly sandboxes = new Map<`sbx_${string}`, SandboxHandle>();
+  private readonly workspaceRunArchiveTransfers = new Map<
+    `upl_${string}`,
+    WorkspaceRunArchiveTransfer
+  >();
 
   constructor(config: McpSessionConfig) {
     this.client =
@@ -42,7 +51,7 @@ export class McpSession {
 
   async createSandbox(input: { readonly ttlMs?: number } = {}): Promise<SandboxHandle> {
     const sandbox = await this.client.sandboxes.create(input);
-    this.trackSandbox(sandbox);
+    this.trackSandbox(sandbox, "owned");
     return sandbox;
   }
 
@@ -52,10 +61,31 @@ export class McpSession {
     }
 
     const sandbox = this.sandboxes.get(sandboxId);
-    if (sandbox === undefined) {
-      throw unknownSandboxError(sandboxId);
+    if (sandbox !== undefined) {
+      return sandbox;
     }
-    return sandbox;
+
+    const adopted = await this.client.sandboxes.get(sandboxId);
+    this.trackSandbox(adopted, "adopted");
+    return adopted;
+  }
+
+  rememberWorkspaceRunArchiveTransfer(transfer: WorkspaceRunArchiveTransfer): void {
+    this.workspaceRunArchiveTransfers.set(transfer.id, transfer);
+  }
+
+  resolveWorkspaceRunArchiveTransfer(
+    uploadId: `upl_${string}`,
+  ): WorkspaceRunArchiveTransfer {
+    const transfer = this.workspaceRunArchiveTransfers.get(uploadId);
+    if (transfer === undefined) {
+      throw new McpSessionError(
+        "unknown_workspace_run_archive_transfer",
+        `Unknown Workspace Run archive transfer id ${uploadId}. Create the transfer with this MCP server session before uploading archive bytes.`,
+      );
+    }
+
+    return transfer;
   }
 
   async resolveDefaultSandbox(): Promise<SandboxHandle> {
@@ -64,6 +94,7 @@ export class McpSession {
       if (sandbox !== undefined) {
         if (!canReuseDefaultSandbox(sandbox)) {
           this.sandboxes.delete(sandbox.id);
+          this.ownedSandboxIds.delete(sandbox.id);
           this.defaultSandboxId = undefined;
         } else {
           return sandbox;
@@ -88,7 +119,11 @@ export class McpSession {
   }
 
   rememberSandbox(sandbox: SandboxHandle): void {
-    this.trackSandbox(sandbox);
+    const ownership =
+      this.ownedSandboxIds.has(sandbox.id) || this.defaultSandboxId === sandbox.id
+        ? "owned"
+        : "adopted";
+    this.trackSandbox(sandbox, ownership);
   }
 
   refreshTrackedSandbox(sandbox: SandboxHandle): boolean {
@@ -96,7 +131,10 @@ export class McpSession {
       return false;
     }
 
-    this.trackSandbox(sandbox);
+    this.trackSandbox(
+      sandbox,
+      this.ownedSandboxIds.has(sandbox.id) ? "owned" : "adopted",
+    );
     return true;
   }
 
@@ -110,13 +148,10 @@ export class McpSession {
   }
 
   async killSandbox(sandboxId: `sbx_${string}`): Promise<void> {
-    const sandbox = this.sandboxes.get(sandboxId);
-    if (sandbox === undefined) {
-      throw unknownSandboxError(sandboxId);
-    }
-
+    const sandbox = await this.resolveSandbox(sandboxId);
     await sandbox.kill();
     this.sandboxes.delete(sandboxId);
+    this.ownedSandboxIds.delete(sandboxId);
     if (this.defaultSandboxId === sandboxId) {
       this.defaultSandboxId = undefined;
       this.defaultSandboxCreation = undefined;
@@ -128,23 +163,23 @@ export class McpSession {
       await Promise.allSettled([this.defaultSandboxCreation]);
     }
 
-    const sandboxes = [...this.sandboxes.values()];
+    const sandboxes = [...this.ownedSandboxIds]
+      .map((sandboxId) => this.sandboxes.get(sandboxId))
+      .filter((sandbox): sandbox is SandboxHandle => sandbox !== undefined);
     this.sandboxes.clear();
+    this.ownedSandboxIds.clear();
+    this.workspaceRunArchiveTransfers.clear();
     this.defaultSandboxId = undefined;
     this.defaultSandboxCreation = undefined;
     await Promise.allSettled(sandboxes.map((sandbox) => sandbox.kill()));
   }
 
-  private trackSandbox(sandbox: SandboxHandle): void {
+  private trackSandbox(sandbox: SandboxHandle, ownership: "adopted" | "owned"): void {
     this.sandboxes.set(sandbox.id, sandbox);
+    if (ownership === "owned") {
+      this.ownedSandboxIds.add(sandbox.id);
+    }
   }
-}
-
-function unknownSandboxError(sandboxId: `sbx_${string}`): McpSessionError {
-  return new McpSessionError(
-    "unknown_sandbox_id",
-    `Unknown Sandbox id ${sandboxId}. This Sandbox was not created by this MCP server session or has already been killed.`,
-  );
 }
 
 function canReuseDefaultSandbox(sandbox: SandboxHandle): boolean {

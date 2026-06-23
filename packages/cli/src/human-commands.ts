@@ -1,4 +1,4 @@
-import { CrowNestApiError } from "@crownest/sdk";
+import { type ApiKeyScope, ApiKeyScopes, CrowNestApiError } from "@crownest/sdk";
 
 import { saveCredentialConfig } from "./credential-config";
 import {
@@ -13,8 +13,6 @@ import {
 } from "./flags";
 import type { CliEnvironment, CliResult } from "./index";
 import { jsonEnvelope, renderList, renderRecord } from "./output";
-
-type ApiKeyScope = (typeof ApiKeyScopes)[number];
 
 type HumanSession = {
   readonly orgId: `org_${string}`;
@@ -53,7 +51,7 @@ export function loginCommand(
     return ok(
       json
         ? jsonEnvelope({ apiUrl, saved: true })
-        : `Saved CrowNest credentials for ${apiUrl}.\n`,
+        : `Saved CrowNest credentials for ${apiUrl}.\nInstall the CrowNest Agent Skill for compatible coding agents with: crownest skills install\n`,
     );
   }
 
@@ -248,31 +246,7 @@ const quickstartDeveloperScopes = [
   "preview:create",
   "preview:read",
   "preview:revoke",
+  "workspace_run:create",
+  "workspace_run:read",
+  "workspace_run:cancel",
 ] as const satisfies readonly ApiKeyScope[];
-
-const ApiKeyScopes = [
-  "sandbox:create",
-  "sandbox:read",
-  "sandbox:kill",
-  "sandbox:extend",
-  "command:run",
-  "command:read",
-  "command:cancel",
-  "code:run",
-  "file:read",
-  "file:write",
-  "artifact:create",
-  "artifact:read",
-  "artifact:delete",
-  "preview:create",
-  "preview:read",
-  "preview:revoke",
-  "backup:create",
-  "backup:read",
-  "backup:restore",
-  "backup:delete",
-  "usage:read",
-  "api_key:read",
-  "api_key:revoke",
-  "project:create",
-] as const;

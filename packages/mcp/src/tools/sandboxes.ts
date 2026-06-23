@@ -33,7 +33,7 @@ export function registerKillSandbox(server: McpServer, session: McpSession): voi
     "kill_sandbox",
     {
       description:
-        "Kill a CrowNest Sandbox created by this MCP server session. If it is the lazy default Sandbox, the next tool call that omits sandbox_id creates a new default Sandbox.",
+        "Kill a CrowNest Sandbox visible to the configured API Key, including Sandboxes adopted by explicit sandbox_id. This is destructive outside MCP session cleanup; if the killed Sandbox is the lazy default Sandbox, the next tool call that omits sandbox_id creates a new default Sandbox.",
       inputSchema: z.object({
         sandbox_id: sandboxIdSchema,
       }),

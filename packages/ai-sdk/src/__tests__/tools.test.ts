@@ -13,7 +13,7 @@ describe("crownestTools", () => {
 function registerSandboxLifecycleTests(): void {
   it("creates one lazy sandbox and reuses it across commands", async () => {
     const { client, commandsRun, sandboxesCreate, sandboxesKill } = mockClient();
-    const tools = crownestTools({ client, template: "python", ttlMs: 120_000 });
+    const tools = crownestTools({ client, template: "python-node", ttlMs: 120_000 });
 
     await executeTool(tools.runCommand, { command: "pwd" });
     await executeTool(tools.runCommand, { command: "python main.py" });
@@ -21,7 +21,7 @@ function registerSandboxLifecycleTests(): void {
 
     expect(sandboxesCreate).toHaveBeenCalledTimes(1);
     expect(sandboxesCreate).toHaveBeenCalledWith({
-      template: "python",
+      template: "python-node",
       ttlMs: 120_000,
     });
     expect(commandsRun.mock.calls.map((call) => call[0])).toEqual([

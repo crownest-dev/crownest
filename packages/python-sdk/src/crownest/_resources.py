@@ -28,6 +28,8 @@ from crownest._types import (
     JsonObject,
     Metadata,
     PreviewAuthMode,
+    WorkspaceRunArtifactRequest,
+    WorkspaceRunStatus,
 )
 
 
@@ -56,6 +58,7 @@ class CrowNest:
         self.previews = PreviewsClient(self._transport)
         self.projects = ProjectsClient(self._transport)
         self.sandboxes = SandboxesClient(self._transport)
+        self.workspace_runs = WorkspaceRunsClient(self._transport)
 
     def usage(self) -> JsonObject:
         """Return current compute usage, credits, and quota buckets."""
@@ -97,6 +100,7 @@ class AsyncCrowNest:
         self.previews = AsyncPreviewsClient(self._transport)
         self.projects = AsyncProjectsClient(self._transport)
         self.sandboxes = AsyncSandboxesClient(self._transport)
+        self.workspace_runs = AsyncWorkspaceRunsClient(self._transport)
 
     async def usage(self) -> JsonObject:
         """Return current compute usage, credits, and quota buckets."""
@@ -549,6 +553,411 @@ class AsyncSandboxesClient:
             method="GET",
         )
         return list(response["data"])
+
+
+class WorkspaceRunsClient:
+    def __init__(self, transport: SyncTransport) -> None:
+        self._transport = transport
+
+    def create(
+        self,
+        *,
+        command: str,
+        artifacts: Sequence[WorkspaceRunArtifactRequest] | None = None,
+        idempotency_key: str | None = None,
+        keep_sandbox: bool | None = None,
+        metadata: Metadata | None = None,
+        project_id: str | None = None,
+        sandbox_id: str | None = None,
+        source_metadata: Metadata | None = None,
+        template: str | None = None,
+        template_version_id: str | None = None,
+        timeout_ms: int | None = None,
+    ) -> JsonObject:
+        """Create a Workspace Run record before archive upload."""
+        response = self._transport.request(
+            "/v1/workspace-runs",
+            method="POST",
+            body=_workspace_run_body(
+                artifacts=artifacts,
+                command=command,
+                keep_sandbox=keep_sandbox,
+                metadata=metadata,
+                project_id=project_id,
+                sandbox_id=sandbox_id,
+                source_metadata=source_metadata,
+                template=template,
+                template_version_id=template_version_id,
+                timeout_ms=timeout_ms,
+            ),
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response["workspaceRun"]
+
+    def upload_archive(
+        self,
+        workspace_run_id: str,
+        content: bytes,
+        *,
+        sha256: str,
+        size_bytes: int,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Upload a small archive directly through the CrowNest API."""
+        response = self._transport.raw(
+            f"/v1/workspace-runs/{workspace_run_id}/archive",
+            method="PUT",
+            content=content,
+            headers=_archive_headers(sha256=sha256, size_bytes=size_bytes),
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response.json()
+
+    def create_archive_transfer(
+        self,
+        workspace_run_id: str,
+        *,
+        sha256: str,
+        size_bytes: int,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Create a staged upload target for a larger Workspace Run archive."""
+        response = self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/archive-transfer",
+            method="POST",
+            body={"sha256": sha256, "sizeBytes": size_bytes},
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response["transfer"]
+
+    def upload_archive_to_transfer(
+        self,
+        transfer: Mapping[str, Any],
+        body: bytes,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
+        """Upload archive bytes to a staged transfer target."""
+        self._transport.raw(
+            str(transfer["uploadUrl"]),
+            method=str(transfer.get("method", "PUT")),
+            content=body,
+            headers={**_string_headers(transfer.get("headers")), **(headers or {})},
+            auth="same-origin",
+        )
+
+    def finalize_archive(
+        self,
+        workspace_run_id: str,
+        *,
+        sha256: str,
+        size_bytes: int,
+        upload_id: str,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Finalize a staged Workspace Run archive transfer."""
+        return self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/archive/finalize",
+            method="POST",
+            body={"sha256": sha256, "sizeBytes": size_bytes, "uploadId": upload_id},
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+
+    def start(
+        self,
+        workspace_run_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Start extraction and command execution for an uploaded Workspace Run."""
+        response = self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/start",
+            method="POST",
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response["workspaceRun"]
+
+    def get(self, workspace_run_id: str) -> JsonObject:
+        """Return Workspace Run metadata by id."""
+        response = self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}",
+            method="GET",
+        )
+        return response["workspaceRun"]
+
+    def list(
+        self,
+        *,
+        metadata: Metadata | None = None,
+        project_id: str | None = None,
+        status: WorkspaceRunStatus | None = None,
+    ) -> list[JsonObject]:
+        """List Workspace Runs visible to the configured credential."""
+        response = self._transport.request(
+            f"/v1/workspace-runs{_workspace_run_list_query(metadata, project_id, status)}",
+            method="GET",
+        )
+        return list(response["data"])
+
+    def list_events(
+        self,
+        workspace_run_id: str,
+        *,
+        after_seq: int | None = None,
+        limit: int | None = None,
+    ) -> JsonObject:
+        """Read a bounded page of Workspace Run events."""
+        return self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/events"
+            f"{_workspace_run_event_query(after_seq, limit, stream=False)}",
+            method="GET",
+        )
+
+    def stream_events(
+        self,
+        workspace_run_id: str,
+        *,
+        after_seq: int | None = None,
+        reconnect: bool = True,
+    ) -> Iterator[JsonObject]:
+        """Stream Workspace Run events with optional reconnect support."""
+        yield from _stream_workspace_run_events(
+            self._transport,
+            workspace_run_id,
+            after_seq=after_seq,
+            reconnect=reconnect,
+        )
+
+    def cancel(
+        self,
+        workspace_run_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Cancel active Workspace Run orchestration."""
+        response = self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/cancel",
+            method="POST",
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response["workspaceRun"]
+
+    def evidence(self, workspace_run_id: str) -> JsonObject:
+        """Read the durable Evidence Bundle for a Workspace Run."""
+        response = self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/evidence",
+            method="GET",
+        )
+        return response["evidence"]
+
+
+class AsyncWorkspaceRunsClient:
+    def __init__(self, transport: AsyncTransport) -> None:
+        self._transport = transport
+
+    async def create(
+        self,
+        *,
+        command: str,
+        artifacts: Sequence[WorkspaceRunArtifactRequest] | None = None,
+        idempotency_key: str | None = None,
+        keep_sandbox: bool | None = None,
+        metadata: Metadata | None = None,
+        project_id: str | None = None,
+        sandbox_id: str | None = None,
+        source_metadata: Metadata | None = None,
+        template: str | None = None,
+        template_version_id: str | None = None,
+        timeout_ms: int | None = None,
+    ) -> JsonObject:
+        """Create a Workspace Run record before archive upload."""
+        response = await self._transport.request(
+            "/v1/workspace-runs",
+            method="POST",
+            body=_workspace_run_body(
+                artifacts=artifacts,
+                command=command,
+                keep_sandbox=keep_sandbox,
+                metadata=metadata,
+                project_id=project_id,
+                sandbox_id=sandbox_id,
+                source_metadata=source_metadata,
+                template=template,
+                template_version_id=template_version_id,
+                timeout_ms=timeout_ms,
+            ),
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response["workspaceRun"]
+
+    async def upload_archive(
+        self,
+        workspace_run_id: str,
+        content: bytes,
+        *,
+        sha256: str,
+        size_bytes: int,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Upload a small archive directly through the CrowNest API."""
+        response = await self._transport.raw(
+            f"/v1/workspace-runs/{workspace_run_id}/archive",
+            method="PUT",
+            content=content,
+            headers=_archive_headers(sha256=sha256, size_bytes=size_bytes),
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response.json()
+
+    async def create_archive_transfer(
+        self,
+        workspace_run_id: str,
+        *,
+        sha256: str,
+        size_bytes: int,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Create a staged upload target for a larger Workspace Run archive."""
+        response = await self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/archive-transfer",
+            method="POST",
+            body={"sha256": sha256, "sizeBytes": size_bytes},
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response["transfer"]
+
+    async def upload_archive_to_transfer(
+        self,
+        transfer: Mapping[str, Any],
+        body: bytes,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
+        """Upload archive bytes to a staged transfer target."""
+        await self._transport.raw(
+            str(transfer["uploadUrl"]),
+            method=str(transfer.get("method", "PUT")),
+            content=body,
+            headers={**_string_headers(transfer.get("headers")), **(headers or {})},
+            auth="same-origin",
+        )
+
+    async def finalize_archive(
+        self,
+        workspace_run_id: str,
+        *,
+        sha256: str,
+        size_bytes: int,
+        upload_id: str,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Finalize a staged Workspace Run archive transfer."""
+        return await self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/archive/finalize",
+            method="POST",
+            body={"sha256": sha256, "sizeBytes": size_bytes, "uploadId": upload_id},
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+
+    async def start(
+        self,
+        workspace_run_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Start extraction and command execution for an uploaded Workspace Run."""
+        response = await self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/start",
+            method="POST",
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response["workspaceRun"]
+
+    async def get(self, workspace_run_id: str) -> JsonObject:
+        """Return Workspace Run metadata by id."""
+        response = await self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}",
+            method="GET",
+        )
+        return response["workspaceRun"]
+
+    async def list(
+        self,
+        *,
+        metadata: Metadata | None = None,
+        project_id: str | None = None,
+        status: WorkspaceRunStatus | None = None,
+    ) -> list[JsonObject]:
+        """List Workspace Runs visible to the configured credential."""
+        response = await self._transport.request(
+            f"/v1/workspace-runs{_workspace_run_list_query(metadata, project_id, status)}",
+            method="GET",
+        )
+        return list(response["data"])
+
+    async def list_events(
+        self,
+        workspace_run_id: str,
+        *,
+        after_seq: int | None = None,
+        limit: int | None = None,
+    ) -> JsonObject:
+        """Read a bounded page of Workspace Run events."""
+        return await self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/events"
+            f"{_workspace_run_event_query(after_seq, limit, stream=False)}",
+            method="GET",
+        )
+
+    async def stream_events(
+        self,
+        workspace_run_id: str,
+        *,
+        after_seq: int | None = None,
+        reconnect: bool = True,
+    ) -> AsyncIterator[JsonObject]:
+        """Stream Workspace Run events with optional reconnect support."""
+        async for event in _async_stream_workspace_run_events(
+            self._transport,
+            workspace_run_id,
+            after_seq=after_seq,
+            reconnect=reconnect,
+        ):
+            yield event
+
+    async def cancel(
+        self,
+        workspace_run_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Cancel active Workspace Run orchestration."""
+        response = await self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/cancel",
+            method="POST",
+            idempotency_key=idempotency_key,
+            idempotent=True,
+        )
+        return response["workspaceRun"]
+
+    async def evidence(self, workspace_run_id: str) -> JsonObject:
+        """Read the durable Evidence Bundle for a Workspace Run."""
+        response = await self._transport.request(
+            f"/v1/workspace-runs/{workspace_run_id}/evidence",
+            method="GET",
+        )
+        return response["evidence"]
 
 
 class CommandsClient:
@@ -1917,6 +2326,111 @@ def _command_log_query(after_seq: int | None, limit: int | None) -> str:
     return f"?{urlencode(params)}" if params else ""
 
 
+def _workspace_run_event_query(
+    after_seq: int | None,
+    limit: int | None,
+    *,
+    stream: bool,
+) -> str:
+    params = _compact(
+        {
+            "afterSeq": after_seq,
+            "limit": limit,
+            "stream": "true" if stream else None,
+        }
+    )
+    return f"?{urlencode(params)}" if params else ""
+
+
+def _stream_workspace_run_events(
+    transport: SyncTransport,
+    workspace_run_id: str,
+    *,
+    after_seq: int | None = None,
+    reconnect: bool = True,
+) -> Iterator[JsonObject]:
+    if not reconnect:
+        yield from transport.stream_sse(
+            f"/v1/workspace-runs/{workspace_run_id}/events"
+            f"{_workspace_run_event_query(after_seq, None, stream=True)}"
+        )
+        return
+
+    retry_index = 0
+    original_error: BaseException | None = None
+    while True:
+        made_progress = False
+        try:
+            for event in transport.stream_sse(
+                f"/v1/workspace-runs/{workspace_run_id}/events"
+                f"{_workspace_run_event_query(after_seq, None, stream=True)}"
+            ):
+                if isinstance(event, Mapping) and "seq" in event:
+                    made_progress = after_seq is None or int(event["seq"]) > after_seq
+                    after_seq = int(event["seq"])
+                yield event
+                if _is_terminal_stream_event(event):
+                    return
+            original_error = original_error or RuntimeError(
+                "Workspace Run event stream ended before a terminal event."
+            )
+        except Exception as exc:
+            if isinstance(exc, CrowNestApiError):
+                raise
+            original_error = original_error or exc
+        if made_progress:
+            retry_index = 0
+        if retry_index >= len(_STREAM_RECONNECT_DELAYS):
+            raise original_error
+        time.sleep(_STREAM_RECONNECT_DELAYS[retry_index])
+        retry_index += 1
+
+
+async def _async_stream_workspace_run_events(
+    transport: AsyncTransport,
+    workspace_run_id: str,
+    *,
+    after_seq: int | None = None,
+    reconnect: bool = True,
+) -> AsyncIterator[JsonObject]:
+    if not reconnect:
+        async for event in transport.stream_sse(
+            f"/v1/workspace-runs/{workspace_run_id}/events"
+            f"{_workspace_run_event_query(after_seq, None, stream=True)}"
+        ):
+            yield event
+        return
+
+    retry_index = 0
+    original_error: BaseException | None = None
+    while True:
+        made_progress = False
+        try:
+            async for event in transport.stream_sse(
+                f"/v1/workspace-runs/{workspace_run_id}/events"
+                f"{_workspace_run_event_query(after_seq, None, stream=True)}"
+            ):
+                if isinstance(event, Mapping) and "seq" in event:
+                    made_progress = after_seq is None or int(event["seq"]) > after_seq
+                    after_seq = int(event["seq"])
+                yield event
+                if _is_terminal_stream_event(event):
+                    return
+            original_error = original_error or RuntimeError(
+                "Workspace Run event stream ended before a terminal event."
+            )
+        except Exception as exc:
+            if isinstance(exc, CrowNestApiError):
+                raise
+            original_error = original_error or exc
+        if made_progress:
+            retry_index = 0
+        if retry_index >= len(_STREAM_RECONNECT_DELAYS):
+            raise original_error
+        await asyncio.sleep(_STREAM_RECONNECT_DELAYS[retry_index])
+        retry_index += 1
+
+
 class _CommandCallbacks:
     def __init__(
         self,
@@ -2255,6 +2769,64 @@ def _sandbox_list_query(metadata: Metadata | None) -> str:
     if not metadata:
         return ""
     return f"?{urlencode({f'metadata.{key}': value for key, value in metadata.items()})}"
+
+
+def _workspace_run_body(
+    *,
+    artifacts: Sequence[WorkspaceRunArtifactRequest] | None = None,
+    command: str,
+    keep_sandbox: bool | None = None,
+    metadata: Metadata | None = None,
+    project_id: str | None = None,
+    sandbox_id: str | None = None,
+    source_metadata: Metadata | None = None,
+    template: str | None = None,
+    template_version_id: str | None = None,
+    timeout_ms: int | None = None,
+) -> JsonObject:
+    return _compact(
+        {
+            "artifacts": list(artifacts) if artifacts is not None else None,
+            "command": command,
+            "keepSandbox": keep_sandbox,
+            "metadata": metadata,
+            "projectId": project_id,
+            "sandboxId": sandbox_id,
+            "sourceMetadata": source_metadata,
+            "template": template,
+            "templateVersionId": template_version_id,
+            "timeoutMs": timeout_ms,
+        }
+    )
+
+
+def _workspace_run_list_query(
+    metadata: Metadata | None,
+    project_id: str | None,
+    status: WorkspaceRunStatus | None,
+) -> str:
+    params: dict[str, str] = {}
+    if project_id is not None:
+        params["projectId"] = project_id
+    if status is not None:
+        params["status"] = status
+    if metadata is not None:
+        params.update({f"metadata.{key}": value for key, value in metadata.items()})
+    return f"?{urlencode(params)}" if params else ""
+
+
+def _archive_headers(*, sha256: str, size_bytes: int) -> dict[str, str]:
+    return {
+        "content-type": "application/gzip",
+        "x-crownest-archive-sha256": sha256,
+        "x-crownest-archive-size": str(size_bytes),
+    }
+
+
+def _string_headers(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): str(header_value) for key, header_value in value.items()}
 
 
 def _run_command_request(

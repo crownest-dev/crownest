@@ -12,6 +12,8 @@ from crownest._types import (
     SandboxId,
     TemplateId,
     TemplateVersionId,
+    WorkspaceRunArtifactRequest,
+    WorkspaceRunStatus,
 )
 
 __all__ = [
@@ -28,4 +30,6 @@ __all__ = [
     "SandboxId",
     "TemplateId",
     "TemplateVersionId",
+    "WorkspaceRunArtifactRequest",
+    "WorkspaceRunStatus",
 ]

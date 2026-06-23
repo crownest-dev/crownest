@@ -7,6 +7,7 @@ import { loadSessionConfig, McpSession } from "../session";
 type TestClient = CrowNestClient & {
   readonly mocks: {
     readonly createSandbox: Mock;
+    readonly getSandbox: Mock;
   };
 };
 
@@ -170,12 +171,41 @@ describe("McpSession explicit Sandboxes", () => {
     expect(first.mocks.kill).toHaveBeenCalledTimes(1);
     expect(second.mocks.kill).toHaveBeenCalledTimes(1);
   });
+
+  it("adopts explicit visible Sandboxes without killing them on cleanup", async () => {
+    const adopted = createSandboxHandle("sbx_adopted");
+    const owned = createSandboxHandle("sbx_owned");
+    const client = createClient([owned]);
+    client.mocks.getSandbox.mockResolvedValueOnce(adopted);
+    const session = new McpSession({ apiKey: "cn_test", client });
+
+    await expect(session.resolveSandbox("sbx_adopted")).resolves.toBe(adopted);
+    await expect(session.createSandbox()).resolves.toBe(owned);
+    await expect(session.cleanup()).resolves.toBeUndefined();
+
+    expect(client.mocks.getSandbox).toHaveBeenCalledWith("sbx_adopted");
+    expect(adopted.mocks.kill).not.toHaveBeenCalled();
+    expect(owned.mocks.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it("can explicitly kill an adopted Sandbox", async () => {
+    const adopted = createSandboxHandle("sbx_adopted");
+    const client = createClient([]);
+    client.mocks.getSandbox.mockResolvedValueOnce(adopted);
+    const session = new McpSession({ apiKey: "cn_test", client });
+
+    await session.killSandbox("sbx_adopted");
+
+    expect(client.mocks.getSandbox).toHaveBeenCalledWith("sbx_adopted");
+    expect(adopted.mocks.kill).toHaveBeenCalledTimes(1);
+  });
 });
 
 function createClient(
   sandboxes: readonly (Promise<SandboxHandle> | SandboxHandle)[],
 ): TestClient {
   const create = vi.fn();
+  const get = vi.fn();
   for (const sandbox of sandboxes) {
     create.mockResolvedValueOnce(sandbox);
   }
@@ -183,9 +213,11 @@ function createClient(
   return {
     sandboxes: {
       create,
+      get,
     },
     mocks: {
       createSandbox: create,
+      getSandbox: get,
     },
   } as unknown as TestClient;
 }

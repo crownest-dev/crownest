@@ -1,4 +1,5 @@
 import type {
+  ApiKeyScope,
   ArtifactDownloadUrlResponse,
   CreateProjectResponse,
   CreateSandboxResponse,
@@ -17,6 +18,7 @@ import type {
   RevokeApiKeyResponse,
   UsageSummaryResponse,
 } from "@crownest/contracts";
+import { ApiKeyScopes } from "@crownest/contracts";
 
 import type {
   CreateSandboxInput,
@@ -39,24 +41,36 @@ import {
   createSandboxHandle,
   createSandboxPreviewsClient,
 } from "./sandbox-handle";
+import { createWorkspaceRunsClient } from "./workspace-runs";
 
 export type {
   CodeArtifactPolicy,
   CodeLanguage,
   CreateProjectInput,
   CreateSandboxInput,
+  CreateWorkspaceRunArchiveTransferInput,
+  CreateWorkspaceRunInput,
   CrowNestClient,
   ExtendSandboxInput,
+  FinalizeWorkspaceRunArchiveInput,
   ListSandboxesInput,
+  ListWorkspaceRunsInput,
+  StartWorkspaceRunInput,
+  UploadWorkspaceRunArchiveInput,
+  UploadWorkspaceRunArchiveTransferInput,
+  WorkspaceRunEventsInput,
+  WorkspaceRunsClient,
 } from "./client-types";
 export type { CrowNestClientOptions, RunCommandOptions } from "./protocol";
 export { CrowNestApiError } from "./protocol";
 export type { SandboxHandle } from "./sandbox-handle";
+export { ApiKeyScopes };
+export type { ApiKeyScope };
 
 /**
  * Create a CrowNest TypeScript client for Sandbox, Command, Code Run,
  * Workspace file, Artifact, Preview, Project, API Key, and usage APIs.
- * @param options - Optional API key, base URL, fetch implementation, and timeout settings.
+ * @param options - Optional bearer credential, base URL, fetch implementation, and timeout settings.
  * @returns A typed CrowNestClient with grouped resource helpers.
  */
 export function createCrowNestClient(
@@ -73,6 +87,7 @@ export function createCrowNestClient(
     previews: createPreviewClient(transport),
     projects: createProjectClient(transport),
     sandboxes: createSandboxClient(transport),
+    workspaceRuns: createWorkspaceRunsClient(transport),
     usage() {
       return transport.request<UsageSummaryResponse>("/v1/usage", {
         method: "GET",

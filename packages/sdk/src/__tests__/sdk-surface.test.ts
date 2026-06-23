@@ -1,7 +1,12 @@
 /* eslint-disable max-lines, max-lines-per-function -- SDK surface tests intentionally keep public client fixtures together. */
 import { describe, expect, it, vi } from "vitest";
 
-import { createCrowNestClient } from "../index";
+import type {
+  ApiKeyScope,
+  CreateWorkspaceRunInput,
+  WorkspaceRunsClient,
+} from "../index";
+import { ApiKeyScopes, createCrowNestClient } from "../index";
 
 describe("SDK surface", () => {
   registerFactoryTests();
@@ -11,6 +16,7 @@ describe("SDK surface", () => {
   registerDirectFileArtifactClientTests();
   registerCommandCollectTests();
   registerCommandClientTests();
+  registerWorkspaceRunTypeSurfaceTests();
 });
 
 function registerFactoryTests() {
@@ -27,6 +33,10 @@ function registerFactoryTests() {
     expect(typeof client.sandboxes.extend).toBe("function");
     expect(typeof client.sandboxes.get).toBe("function");
     expect(typeof client.usage).toBe("function");
+    expect(ApiKeyScopes).toContain("workspace_run:create");
+
+    const scope: ApiKeyScope = "workspace_run:read";
+    expect(scope).toBe("workspace_run:read");
   });
 
   it("exposes CRUD completion helpers on root clients and sandbox handles", async () => {
@@ -235,6 +245,258 @@ function registerSandboxCodeHandleTests() {
     expect((streamHeaders as Headers).get("idempotency-key")).toBe(
       "direct-code-stream-key",
     );
+  });
+}
+
+function registerWorkspaceRunTypeSurfaceTests() {
+  it("exposes Workspace Run SDK helpers", async () => {
+    const workspaceRun = workspaceRunBody();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ workspaceRun }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          archive: { sha256: "abc", sizeBytes: 3 },
+          workspaceRun: { ...workspaceRun, status: "archive_uploaded" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          transfer: {
+            checksumAlgorithm: "sha256",
+            expiresAt: "2026-06-17T12:10:00.000Z",
+            headers: { "x-upload-token": "upload-token" },
+            id: "upl_test",
+            maxSizeBytes: 1_000,
+            method: "PUT",
+            status: "pending",
+            uploadUrl: "https://uploads.test/wsr_test/upl_test",
+            workspaceRunId: "wsr_test",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          archive: { sha256: "abc", sizeBytes: 3 },
+          workspaceRun: { ...workspaceRun, status: "archive_uploaded" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ workspaceRun: { ...workspaceRun, status: "running" } }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ workspaceRun }))
+      .mockResolvedValueOnce(jsonResponse({ data: [workspaceRun], hasMore: false }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            {
+              createdAt: "2026-06-17T12:00:00.500Z",
+              seq: 10,
+              type: "log",
+              line: "install complete",
+              stream: "stdout",
+            },
+          ],
+          hasMore: true,
+          nextSeq: 11,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          'event: status\ndata: {"type":"status","seq":1,"status":"running","createdAt":"2026-06-17T12:00:01.000Z"}\n\n',
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ workspaceRun }))
+      .mockResolvedValueOnce(jsonResponse({ evidence: workspaceRunEvidenceBody() }));
+    const input: CreateWorkspaceRunInput = {
+      artifacts: [{ path: "coverage/lcov.info" }],
+      command: "pnpm test",
+      idempotencyKey: "workspace-run-create",
+      keepSandbox: true,
+      metadata: { agent: "crabbox" },
+      sourceMetadata: { branch: "main", dirty: "true" },
+      template: "python-node",
+    };
+    const client = createCrowNestClient({
+      apiKey: "cn_live_test",
+      baseUrl: "https://api.test",
+      fetch: fetchMock,
+    });
+    const typedClient: WorkspaceRunsClient = client.workspaceRuns;
+
+    await expect(typedClient.create(input)).resolves.toMatchObject({
+      id: "wsr_test",
+    });
+    await expect(
+      typedClient.uploadArchive("wsr_test", {
+        bytes: new Uint8Array([31, 139, 8]),
+        idempotencyKey: "upload-key",
+        sha256: "abc",
+        sizeBytes: 3,
+      }),
+    ).resolves.toMatchObject({ archive: { sha256: "abc" } });
+    const transfer = await typedClient.createArchiveTransfer("wsr_test", {
+      idempotencyKey: "transfer-key",
+      sha256: "abc",
+      sizeBytes: 3,
+    });
+    await expect(
+      typedClient.uploadArchiveToTransfer(transfer, {
+        body: new Uint8Array([31, 139, 8]),
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      typedClient.finalizeArchive("wsr_test", {
+        idempotencyKey: "finalize-key",
+        sha256: "abc",
+        sizeBytes: 3,
+        uploadId: "upl_test",
+      }),
+    ).resolves.toMatchObject({ workspaceRun: { status: "archive_uploaded" } });
+    await expect(
+      typedClient.start("wsr_test", { idempotencyKey: "start-key" }),
+    ).resolves.toMatchObject({ status: "running" });
+    await expect(typedClient.get("wsr_test")).resolves.toMatchObject({
+      id: "wsr_test",
+    });
+    await expect(
+      typedClient.list({
+        metadata: { agent: "crabbox" },
+        projectId: "prj_test",
+        status: "running",
+      }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      typedClient.listEvents("wsr_test", { afterSeq: 9, limit: 2 }),
+    ).resolves.toMatchObject({
+      data: [{ seq: 10, type: "log" }],
+      hasMore: true,
+      nextSeq: 11,
+    });
+
+    const events = [];
+    for await (const event of typedClient.streamEvents("wsr_test", {
+      afterSeq: 9,
+      reconnect: false,
+    })) {
+      events.push(event);
+    }
+    await expect(typedClient.cancel("wsr_test")).resolves.toMatchObject({
+      id: "wsr_test",
+    });
+    await expect(typedClient.evidence("wsr_test")).resolves.toMatchObject({
+      workspaceRunId: "wsr_test",
+    });
+
+    expect(events).toEqual([
+      {
+        createdAt: "2026-06-17T12:00:01.000Z",
+        seq: 1,
+        status: "running",
+        type: "status",
+      },
+    ]);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.test/v1/workspace-runs",
+      "https://api.test/v1/workspace-runs/wsr_test/archive",
+      "https://api.test/v1/workspace-runs/wsr_test/archive-transfer",
+      "https://uploads.test/wsr_test/upl_test",
+      "https://api.test/v1/workspace-runs/wsr_test/archive/finalize",
+      "https://api.test/v1/workspace-runs/wsr_test/start",
+      "https://api.test/v1/workspace-runs/wsr_test",
+      "https://api.test/v1/workspace-runs?projectId=prj_test&status=running&metadata.agent=crabbox",
+      "https://api.test/v1/workspace-runs/wsr_test/events?afterSeq=9&limit=2",
+      "https://api.test/v1/workspace-runs/wsr_test/events?afterSeq=9&stream=true",
+      "https://api.test/v1/workspace-runs/wsr_test/cancel",
+      "https://api.test/v1/workspace-runs/wsr_test/evidence",
+    ]);
+    const directHeaders = fetchMock.mock.calls[1]?.[1]?.headers;
+    expect(directHeaders).toBeInstanceOf(Headers);
+    expect((directHeaders as Headers).get("content-type")).toBe("application/gzip");
+    expect((directHeaders as Headers).get("x-crownest-archive-sha256")).toBe("abc");
+    expect((directHeaders as Headers).get("idempotency-key")).toBe("upload-key");
+    const stagedHeaders = fetchMock.mock.calls[3]?.[1]?.headers;
+    expect(stagedHeaders).toBeInstanceOf(Headers);
+    expect((stagedHeaders as Headers).get("authorization")).toBeNull();
+    expect((stagedHeaders as Headers).get("x-upload-token")).toBe("upload-token");
+  });
+
+  it("authenticates same-origin Workspace Run archive transfer targets only", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createCrowNestClient({
+      apiKey: "cn_live_test",
+      baseUrl: "https://api.test",
+      fetch: fetchMock,
+    });
+    const transfer = {
+      checksumAlgorithm: "sha256",
+      expiresAt: "2026-06-17T12:10:00.000Z",
+      headers: {
+        "content-length": "7",
+        "content-type": "application/gzip",
+      },
+      id: "upl_test",
+      maxSizeBytes: 1_000,
+      method: "PUT",
+      status: "pending",
+      uploadUrl:
+        "https://api.test/v1/workspace-runs/wsr_test/archive-transfer/upl_test",
+      workspaceRunId: "wsr_test",
+    } as const;
+
+    await expect(
+      client.workspaceRuns.uploadArchiveToTransfer(transfer, {
+        body: new Blob(["archive"]),
+        headers: { "content-length": "7" },
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      client.workspaceRuns.uploadArchiveToTransfer(
+        {
+          ...transfer,
+          headers: { "x-upload-token": "token" },
+          uploadUrl: "https://uploads.test/wsr_test/upl_test",
+        },
+        { body: new Blob(["archive"]) },
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      client.workspaceRuns.uploadArchiveToTransfer(
+        {
+          ...transfer,
+          uploadUrl: "https://uploads.test/wsr_test/upl_stream",
+        },
+        { body: streamFromText("archive") },
+      ),
+    ).resolves.toBeUndefined();
+
+    const sameOriginHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(sameOriginHeaders).toBeInstanceOf(Headers);
+    expect((sameOriginHeaders as Headers).get("authorization")).toBe(
+      "Bearer cn_live_test",
+    );
+    expect((sameOriginHeaders as Headers).get("content-type")).toBe("application/gzip");
+    expect((sameOriginHeaders as Headers).get("content-length")).toBe("7");
+    const externalHeaders = fetchMock.mock.calls[1]?.[1]?.headers;
+    expect(externalHeaders).toBeInstanceOf(Headers);
+    expect((externalHeaders as Headers).get("authorization")).toBeNull();
+    expect((externalHeaders as Headers).get("x-upload-token")).toBe("token");
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ duplex: "half" });
+  });
+}
+
+function streamFromText(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
   });
 }
 
@@ -583,8 +845,8 @@ function sandboxBody(overrides: Record<string, unknown> = {}) {
     orgId: "org_123",
     projectId: "prj_123",
     status: "ready",
-    templateId: "tpl_python",
-    templateSlug: "python",
+    templateId: "tpl_python_node",
+    templateSlug: "python-node",
     templateVersion: "2026-06-01",
     templateVersionId: "tplv_123",
     ttlMs: 3_600_000,
@@ -602,6 +864,41 @@ function artifactResponseBody() {
     projectId: "prj_123",
     sandboxId: "sbx_123",
     sizeBytes: 5,
+  };
+}
+
+function workspaceRunBody(overrides: Record<string, unknown> = {}) {
+  return {
+    command: "pnpm test",
+    createdAt: "2026-06-17T12:00:00.000Z",
+    id: "wsr_test",
+    keepSandbox: true,
+    metadata: {},
+    orgId: "org_test",
+    projectId: "prj_test",
+    status: "awaiting_archive",
+    templateId: "tpl_python_node",
+    templateSlug: "python-node",
+    templateVersion: "2026-06-17",
+    templateVersionId: "tplv_python_node",
+    ...overrides,
+  };
+}
+
+function workspaceRunEvidenceBody() {
+  return {
+    artifactErrors: [],
+    artifactIds: [],
+    cleanupStatus: "succeeded",
+    command: "pnpm test",
+    createdAt: "2026-06-17T12:00:00.000Z",
+    envKeys: [],
+    metadata: {},
+    orchestrationSucceeded: true,
+    orgId: "org_test",
+    projectId: "prj_test",
+    status: "succeeded",
+    workspaceRunId: "wsr_test",
   };
 }
 

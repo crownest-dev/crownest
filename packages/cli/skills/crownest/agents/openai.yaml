@@ -1,0 +1,4 @@
+interface:
+  display_name: "CrowNest"
+  short_description: "Cloud sandboxes for coding agents"
+  default_prompt: "Use $crownest to run code in a cloud Sandbox and export durable outputs."

@@ -5,6 +5,7 @@ import {
   formatArtifact,
   formatArtifactDownload,
   formatArtifactList,
+  jsonTextResult,
 } from "../formatting";
 import type { McpSession } from "../session";
 import { artifactIdSchema, handleTool, sandboxIdSchema } from "./shared";
@@ -26,6 +27,30 @@ export function registerDownloadArtifact(server: McpServer, session: McpSession)
         const bytes = await session.client.artifacts.download(artifactId);
         return formatArtifactDownload(artifact, bytes);
       }),
+  );
+}
+
+export function registerGetArtifactDownloadUrl(
+  server: McpServer,
+  session: McpSession,
+): void {
+  server.registerTool(
+    "get_artifact_download_url",
+    {
+      description:
+        "Create or reuse a short-lived download URL for a durable CrowNest Artifact. Use this for larger Artifacts instead of returning base64 content through download_artifact.",
+      inputSchema: z.object({
+        artifact_id: artifactIdSchema,
+      }),
+    },
+    (input) =>
+      handleTool(async () =>
+        jsonTextResult(
+          await session.client.artifacts.downloadUrl(
+            input.artifact_id as `art_${string}`,
+          ),
+        ),
+      ),
   );
 }
 

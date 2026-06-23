@@ -10,16 +10,27 @@ import type {
   CommandLogChunk,
   CommandLogStreamEvent,
   CreatePreviewResponse,
+  CreateWorkspaceRunArchiveTransferBody,
+  CreateWorkspaceRunBody,
   FileDownloadUrlResponse,
   FileEncoding,
   FileEntry,
   FileStat,
+  FinalizeWorkspaceRunArchiveBody,
+  ListWorkspaceRunEventsResponse,
   Preview,
   PreviewAuthMode,
   Project,
   RunCodeResult,
   Sandbox,
+  UploadWorkspaceRunArchiveRequest,
   UsageSummaryResponse,
+  WorkspaceRun,
+  WorkspaceRunArchive,
+  WorkspaceRunArchiveTransfer,
+  WorkspaceRunEvidenceBundle,
+  WorkspaceRunStatus,
+  WorkspaceRunStreamEvent,
 } from "@crownest/contracts";
 
 import type { RunCommandOptions } from "./protocol";
@@ -48,6 +59,98 @@ export type ExtendSandboxInput = {
 
 export type ListSandboxesInput = {
   readonly metadata?: Readonly<Record<string, string>>;
+};
+
+export type CreateWorkspaceRunInput = CreateWorkspaceRunBody & {
+  readonly idempotencyKey?: string;
+};
+
+export type UploadWorkspaceRunArchiveInput = UploadWorkspaceRunArchiveRequest & {
+  readonly idempotencyKey?: string;
+};
+
+export type UploadWorkspaceRunArchiveTransferInput = {
+  readonly body: BodyInit;
+  readonly headers?: HeadersInit;
+};
+
+export type CreateWorkspaceRunArchiveTransferInput =
+  CreateWorkspaceRunArchiveTransferBody & {
+    readonly idempotencyKey?: string;
+  };
+
+export type FinalizeWorkspaceRunArchiveInput = FinalizeWorkspaceRunArchiveBody & {
+  readonly idempotencyKey?: string;
+};
+
+export type StartWorkspaceRunInput = {
+  readonly idempotencyKey?: string;
+};
+
+export type ListWorkspaceRunsInput = {
+  readonly metadata?: Readonly<Record<string, string>>;
+  readonly projectId?: `prj_${string}`;
+  readonly status?: WorkspaceRunStatus;
+};
+
+export type WorkspaceRunEventsInput = {
+  readonly afterSeq?: number;
+  readonly limit?: number;
+  readonly reconnect?: boolean;
+};
+
+export type WorkspaceRunsClient = {
+  /** Create a Workspace Run record before archive upload. */
+  create(input: CreateWorkspaceRunInput): Promise<WorkspaceRun>;
+  /** Cancel active Workspace Run orchestration. */
+  cancel(workspaceRunId: `wsr_${string}`): Promise<WorkspaceRun>;
+  /** Create a staged archive transfer target for larger archives. */
+  createArchiveTransfer(
+    workspaceRunId: `wsr_${string}`,
+    input: CreateWorkspaceRunArchiveTransferInput,
+  ): Promise<WorkspaceRunArchiveTransfer>;
+  /** Read the durable Evidence Bundle for a completed Workspace Run. */
+  evidence(workspaceRunId: `wsr_${string}`): Promise<WorkspaceRunEvidenceBundle>;
+  /** Finalize a staged archive transfer after direct upload. */
+  finalizeArchive(
+    workspaceRunId: `wsr_${string}`,
+    input: FinalizeWorkspaceRunArchiveInput,
+  ): Promise<{
+    readonly archive: WorkspaceRunArchive;
+    readonly workspaceRun: WorkspaceRun;
+  }>;
+  /** Retrieve Workspace Run metadata. */
+  get(workspaceRunId: `wsr_${string}`): Promise<WorkspaceRun>;
+  /** List Workspace Runs visible to the configured credential. */
+  list(input?: ListWorkspaceRunsInput): Promise<readonly WorkspaceRun[]>;
+  /** Replay bounded Workspace Run events without opening an SSE stream. */
+  listEvents(
+    workspaceRunId: `wsr_${string}`,
+    input?: WorkspaceRunEventsInput,
+  ): Promise<ListWorkspaceRunEventsResponse>;
+  /** Start extraction and command execution for an uploaded Workspace Run. */
+  start(
+    workspaceRunId: `wsr_${string}`,
+    input?: StartWorkspaceRunInput,
+  ): Promise<WorkspaceRun>;
+  /** Stream Workspace Run events with optional reconnect support. */
+  streamEvents(
+    workspaceRunId: `wsr_${string}`,
+    input?: WorkspaceRunEventsInput,
+  ): AsyncIterable<WorkspaceRunStreamEvent>;
+  /** Upload a small archive through the API Worker path. */
+  uploadArchive(
+    workspaceRunId: `wsr_${string}`,
+    input: UploadWorkspaceRunArchiveInput,
+  ): Promise<{
+    readonly archive: WorkspaceRunArchive;
+    readonly workspaceRun: WorkspaceRun;
+  }>;
+  /** Upload an archive body to a staged transfer target. */
+  uploadArchiveToTransfer(
+    transfer: WorkspaceRunArchiveTransfer,
+    input: UploadWorkspaceRunArchiveTransferInput,
+  ): Promise<void>;
 };
 
 export type CreateProjectInput = {
@@ -238,6 +341,7 @@ export type CrowNestClient = {
     /** List live Sandboxes visible to the configured credential. */
     list(input?: ListSandboxesInput): Promise<readonly Sandbox[]>;
   };
+  readonly workspaceRuns: WorkspaceRunsClient;
   /** Read current compute usage, credits, and quota buckets. */
   usage(): Promise<UsageSummaryResponse>;
 };

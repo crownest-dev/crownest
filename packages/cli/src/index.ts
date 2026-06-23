@@ -53,6 +53,8 @@ import {
   revokePreviewCommand,
 } from "./preview-commands";
 import { shellCommand } from "./shell-command";
+import { installSkillCommand } from "./skill-commands";
+import { workspaceRunCommand } from "./workspace-run-commands";
 
 export const cliName = "crownest";
 
@@ -72,6 +74,7 @@ export const canonicalCliCommands = [
   "commands cancel",
   "logs",
   "shell",
+  "skills install",
   "code run",
   "files read",
   "files write",
@@ -88,6 +91,15 @@ export const canonicalCliCommands = [
   "previews create",
   "previews list",
   "previews revoke",
+  "workspace-runs create",
+  "workspace-runs upload",
+  "workspace-runs start",
+  "workspace-runs run-archive",
+  "workspace-runs status",
+  "workspace-runs list",
+  "workspace-runs logs",
+  "workspace-runs cancel",
+  "workspace-runs evidence",
 ] as const;
 
 export type CanonicalCliCommand = (typeof canonicalCliCommands)[number];
@@ -101,6 +113,7 @@ export type CliResult = {
 export type CliEnvironment = {
   readonly CROWNEST_API_KEY?: string;
   readonly CROWNEST_API_URL?: string;
+  readonly CROWNEST_BEARER_TOKEN?: string;
   readonly CROWNEST_CONFIG_PATH?: string;
   readonly CROWNEST_DASHBOARD_URL?: string;
   readonly CROWNEST_ORG_ID?: string;
@@ -170,6 +183,7 @@ export async function runCli(
     "sandboxes extend": () => extendSandbox(client, rest),
     "sandboxes kill": () => killSandbox(client, rest),
     "sandboxes list": () => listSandboxes(client, rest),
+    "skills install": () => installSkillCommand(rest, environment),
   };
   const handler =
     resource === "logs"
@@ -178,7 +192,9 @@ export async function runCli(
         ? () => Promise.resolve(loginCommand(compact([action, ...rest]), environment))
         : resource === "shell"
           ? () => shellCommand(client, compact([action, ...rest]), input, output)
-          : handlers[command];
+          : resource === "workspace-runs"
+            ? () => workspaceRunCommand(client, action, rest, { output })
+            : handlers[command];
 
   try {
     if (handler) return await handler();
@@ -475,11 +491,15 @@ function clientOptions(
   fetchImpl: typeof fetch | undefined,
 ): CrowNestClientOptions {
   const config = loadCredentialConfig(environment);
-  const apiKey = environment.CROWNEST_API_KEY ?? config.apiKey;
+  const credential =
+    environment.CROWNEST_BEARER_TOKEN ??
+    environment.CROWNEST_API_KEY ??
+    config.credential ??
+    config.apiKey;
   const apiUrl = environment.CROWNEST_API_URL ?? config.apiUrl;
 
   return {
-    ...(apiKey === undefined ? {} : { apiKey }),
+    ...(credential === undefined ? {} : { credential }),
     ...(apiUrl === undefined ? {} : { baseUrl: apiUrl }),
     ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
   };

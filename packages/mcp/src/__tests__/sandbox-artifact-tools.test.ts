@@ -67,7 +67,7 @@ describe("Sandbox tools", () => {
     });
     expect(text(list)).toContain('"sandbox_id": "sbx_ready"');
     expect(text(list)).not.toContain("sbx_destroyed");
-    expect(text(get)).toContain('"template": "python@1.0.0"');
+    expect(text(get)).toContain('"template": "python-node@1.0.0"');
     expect(text(extend)).toContain('"sandbox_id": "sbx_extended"');
   });
 
@@ -121,15 +121,26 @@ describe("Artifact tools", () => {
     const { client, tools } = createHarness([sandbox]);
     client.mocks.getArtifact.mockResolvedValueOnce(artifact());
     client.mocks.downloadArtifact.mockResolvedValueOnce(new Uint8Array([104, 105]));
+    client.mocks.downloadArtifactUrl.mockResolvedValueOnce({
+      authMode: "api_key",
+      headers: { authorization: "Bearer cn_test" },
+      method: "GET",
+      url: "https://api.test/artifacts/art_123/download",
+    });
 
     const result = await callTool(tools, "download_artifact", {
+      artifact_id: "art_123",
+    });
+    const url = await callTool(tools, "get_artifact_download_url", {
       artifact_id: "art_123",
     });
 
     expect(client.mocks.getArtifact).toHaveBeenCalledWith("art_123");
     expect(client.mocks.downloadArtifact).toHaveBeenCalledWith("art_123");
+    expect(client.mocks.downloadArtifactUrl).toHaveBeenCalledWith("art_123");
     expect(text(result)).toContain('"content_base64": "aGk="');
     expect(text(result)).toContain('"content_type": "application/octet-stream"');
+    expect(text(url)).toContain('"url": "https://api.test/artifacts/art_123/download"');
   });
 
   it("creates, lists, inspects, and deletes Artifact metadata", async () => {
@@ -204,15 +215,21 @@ describe("tool error mapping", () => {
   });
 
   it("maps unknown Sandbox ids to stable MCP tool errors", async () => {
-    const { tools } = createHarness();
+    const { client, tools } = createHarness();
+    client.mocks.getSandbox.mockRejectedValue(
+      new CrowNestApiError(404, {
+        code: "sandbox_not_found",
+        message: "Sandbox not found",
+      }),
+    );
 
     const command = await callTool(tools, "run_command", unknownCommandInput());
     const kill = await callTool(tools, "kill_sandbox", unknownKillInput());
 
     expect(command.isError).toBe(true);
     expect(kill.isError).toBe(true);
-    expect(text(command)).toContain("unknown_sandbox_id:");
-    expect(text(kill)).toContain("unknown_sandbox_id:");
+    expect(text(command)).toContain("sandbox_not_found:");
+    expect(text(kill)).toContain("sandbox_not_found:");
   });
 
   it("maps non-SDK failures to internal_error without stack traces", async () => {
@@ -268,7 +285,7 @@ function sandboxResource(id: `sbx_${string}`, status: string) {
     projectId: "prj_123",
     status,
     templateId: "tpl_123",
-    templateSlug: "python",
+    templateSlug: "python-node",
     templateVersion: "1.0.0",
     templateVersionId: "tplv_123",
     ttlMs: 60_000,

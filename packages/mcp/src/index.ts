@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
+import { registerCrowNestContext } from "./context";
 import { loadSessionConfig, type McpSession } from "./session";
 import { McpSession as CrowNestMcpSession } from "./session";
 import { registerCrowNestTools } from "./tools";
@@ -26,6 +27,7 @@ export async function main(): Promise<void> {
   const server = createCrowNestMcpServer(readPackageVersion());
 
   registerCrowNestTools(server, session);
+  registerCrowNestContext(server, session);
   installCleanupHandlers(session);
 
   const transport = new OmittedArgumentsTransport(new StdioServerTransport());
@@ -37,8 +39,9 @@ export const CROWNEST_MCP_INSTRUCTIONS = [
   "Tools that accept sandbox_id can omit it to use the MCP session's lazy default Sandbox: the first default-scoped call creates it, later calls reuse it until it expires, is killed, or this MCP server exits.",
   "Sandboxes created by this MCP server are best-effort killed on MCP session exit; Sandbox TTL can be extended while live, and the platform TTL backstop still applies.",
   "run_code executes stateful Python Code Runs in the selected Sandbox. Variables and imports persist in the Code Context, and display outputs are auto-promoted to Artifacts when possible. Oversized, unsafe, or unsupported outputs are reported as rejected outputs.",
-  "MCP tools currently do not accept caller-provided idempotency keys. For exact replay semantics across retry-sensitive mutations, route that step through the CLI or SDK idempotency-key options.",
+  "Workspace Run tools accept caller-provided idempotency_key values for retry-sensitive create, archive upload, staged transfer, finalize, and start operations. Use SDK or CLI idempotency-key options for other retry-sensitive mutations when needed.",
   "Use get_usage for current compute, credit, quota, and MCP-session Sandbox state. Use list_sandboxes for account-visible live Sandboxes.",
+  "Use get_agent_context or the crownest://agent/context resource for bounded workflow guidance and current MCP session state.",
   "For the full capability map and retry/idempotency patterns, see https://crownest.dev/docs/api/capabilities and https://crownest.dev/docs/guides/agent-patterns.",
 ].join("\n\n");
 

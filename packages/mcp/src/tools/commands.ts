@@ -44,6 +44,34 @@ export function registerRunCommand(server: McpServer, session: McpSession): void
   );
 }
 
+export function registerStartCommand(server: McpServer, session: McpSession): void {
+  server.registerTool(
+    "start_command",
+    {
+      description:
+        "Start a CrowNest Command in a Sandbox without waiting for completion. Omit sandbox_id to lazily create or reuse the MCP session's default Sandbox, or pass sandbox_id to target and adopt a visible Sandbox. Use get_command and stream_command_logs to inspect progress.",
+      inputSchema: z.object({
+        command: z.string(),
+        cwd: z.string().optional(),
+        sandbox_id: sandboxIdSchema.optional(),
+        timeout_ms: z.number().int().positive().optional(),
+      }),
+    },
+    (input) =>
+      handleTool(async () => {
+        const sandbox = await session.resolveSandbox(
+          input.sandbox_id as `sbx_${string}` | undefined,
+        );
+        return formatCommandDetails(
+          await sandbox.commands.start(input.command, {
+            ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+            ...(input.timeout_ms === undefined ? {} : { timeoutMs: input.timeout_ms }),
+          }),
+        );
+      }),
+  );
+}
+
 export function registerGetCommand(server: McpServer, session: McpSession): void {
   server.registerTool(
     "get_command",

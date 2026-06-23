@@ -49,7 +49,8 @@ function registerHumanCliTests() {
       ),
     ).resolves.toMatchObject({
       exitCode: 0,
-      stdout: "Saved CrowNest credentials for https://api.test.\n",
+      stdout:
+        "Saved CrowNest credentials for https://api.test.\nInstall the CrowNest Agent Skill for compatible coding agents with: crownest skills install\n",
     });
 
     const result = await runCli(["projects", "list"], environment, fetchMock);

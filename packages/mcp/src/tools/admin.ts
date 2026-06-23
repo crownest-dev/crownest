@@ -1,7 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 
-import { formatApiKey, formatApiKeyList, formatProject } from "../formatting";
+import {
+  formatApiKey,
+  formatApiKeyList,
+  formatProject,
+  formatProjectList,
+} from "../formatting";
 import type { McpSession } from "../session";
 import { apiKeyIdSchema, handleTool } from "./shared";
 
@@ -14,6 +19,25 @@ export function registerListApiKeys(server: McpServer, session: McpSession): voi
       inputSchema: z.object({}),
     },
     () => handleTool(async () => formatApiKeyList(await session.client.apiKeys.list())),
+  );
+}
+
+export function registerGetApiKey(server: McpServer, session: McpSession): void {
+  server.registerTool(
+    "get_api_key",
+    {
+      description:
+        "Retrieve CrowNest API Key metadata by API Key id. Secret key values are never returned; project restrictions and scopes are included when visible.",
+      inputSchema: z.object({
+        api_key_id: apiKeyIdSchema,
+      }),
+    },
+    (input) =>
+      handleTool(async () =>
+        formatApiKey(
+          await session.client.apiKeys.get(input.api_key_id as `key_${string}`),
+        ),
+      ),
   );
 }
 
@@ -50,5 +74,18 @@ export function registerCreateProject(server: McpServer, session: McpSession): v
       handleTool(async () =>
         formatProject(await session.client.projects.create({ name: input.name })),
       ),
+  );
+}
+
+export function registerListProjects(server: McpServer, session: McpSession): void {
+  server.registerTool(
+    "list_projects",
+    {
+      description:
+        "List CrowNest Projects visible to the configured credential. Use this as the read path for Project ids before creating Sandboxes, Workspace Runs, or API-key restrictions.",
+      inputSchema: z.object({}),
+    },
+    () =>
+      handleTool(async () => formatProjectList(await session.client.projects.list())),
   );
 }

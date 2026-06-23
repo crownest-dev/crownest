@@ -1,6 +1,6 @@
 {
   "name": "@crownest/contracts",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Public TypeScript API contracts for CrowNest cloud sandboxes.",
   "license": "Apache-2.0",
   "type": "module",
@@ -48,6 +48,8 @@
     "dist/public-api.d.ts",
     "dist/public-resources.js",
     "dist/public-resources.d.ts",
+    "dist/workspace-runs.js",
+    "dist/workspace-runs.d.ts",
     "dist/errors.js",
     "dist/errors.d.ts",
     "dist/ids.js",

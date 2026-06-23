@@ -7,6 +7,7 @@ import type { CliEnvironment } from "./index";
 export type CliCredentialConfig = {
   readonly apiKey?: string;
   readonly apiUrl?: string;
+  readonly credential?: string;
 };
 
 export function loadCredentialConfig(environment: CliEnvironment): CliCredentialConfig {
@@ -26,7 +27,8 @@ export function loadCredentialConfig(environment: CliEnvironment): CliCredential
 
 export function saveCredentialConfig(
   environment: CliEnvironment,
-  config: Required<CliCredentialConfig>,
+  config: Required<Pick<CliCredentialConfig, "apiUrl">> &
+    Pick<CliCredentialConfig, "apiKey" | "credential">,
 ): void {
   const configPath = credentialConfigPath(environment);
   const tempPath = `${configPath}.tmp`;

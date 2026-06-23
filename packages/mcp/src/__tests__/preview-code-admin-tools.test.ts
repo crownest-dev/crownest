@@ -44,61 +44,93 @@ describe("Preview tools", () => {
 });
 
 describe("Code Context tools", () => {
-  it("lists and inspects Code Contexts inside a Sandbox", async () => {
+  it("creates, lists, inspects, and deletes Code Contexts inside a Sandbox", async () => {
     const sandbox = createSandboxHandle("sbx_code_context");
+    sandbox.mocks.codeCreateContext.mockResolvedValueOnce(codeContext());
     sandbox.mocks.codeListContexts.mockResolvedValueOnce([codeContext()]);
     sandbox.mocks.codeGetContext.mockResolvedValueOnce(codeContext());
+    sandbox.mocks.codeDeleteContext.mockResolvedValueOnce({
+      ...codeContext(),
+      deletedAt: "2026-06-12T12:01:00.000Z",
+    });
     const { tools } = createHarness([sandbox]);
 
+    const created = await callTool(tools, "create_code_context", {
+      cwd: "/workspace/app",
+      language: "typescript",
+      timeout_ms: 500,
+    });
     const list = await callTool(tools, "list_code_contexts", {});
     const get = await callTool(tools, "get_code_context", {
       code_context_id: "cctx_123",
     });
+    const deleted = await callTool(tools, "delete_code_context", {
+      code_context_id: "cctx_123",
+    });
 
+    expect(sandbox.mocks.codeCreateContext).toHaveBeenCalledWith({
+      cwd: "/workspace/app",
+      language: "typescript",
+      timeoutMs: 500,
+    });
     expect(sandbox.mocks.codeListContexts).toHaveBeenCalledWith();
     expect(sandbox.mocks.codeGetContext).toHaveBeenCalledWith("cctx_123");
+    expect(sandbox.mocks.codeDeleteContext).toHaveBeenCalledWith("cctx_123");
+    expect(text(created)).toContain('"code_context_id": "cctx_123"');
     expect(text(list)).toContain('"sandbox_id": "sbx_code_context"');
     expect(text(get)).toContain('"code_context_id": "cctx_123"');
+    expect(text(deleted)).toContain('"code_context_id": "cctx_123"');
   });
 });
 
 describe("API Key tools", () => {
-  it("lists and revokes API Key metadata without exposing secrets", async () => {
+  it("lists, gets, and revokes API Key metadata without exposing secrets", async () => {
     const { client, tools } = createHarness();
     client.mocks.listApiKeys.mockResolvedValueOnce([apiKey()]);
+    client.mocks.getApiKey.mockResolvedValueOnce(apiKey());
     client.mocks.revokeApiKey.mockResolvedValueOnce({
       ...apiKey(),
       revokedAt: "2026-06-12T12:01:00.000Z",
     });
 
     const list = await callTool(tools, "list_api_keys", {});
+    const get = await callTool(tools, "get_api_key", {
+      api_key_id: "key_123",
+    });
     const revoked = await callTool(tools, "revoke_api_key", {
       api_key_id: "key_123",
     });
 
     expect(client.mocks.listApiKeys).toHaveBeenCalledWith();
+    expect(client.mocks.getApiKey).toHaveBeenCalledWith("key_123");
     expect(client.mocks.revokeApiKey).toHaveBeenCalledWith("key_123");
     expect(text(list)).toContain('"api_key_id": "key_123"');
     expect(text(list)).toContain('"last4": "cdef"');
     expect(text(list)).not.toContain("cn_live_secret");
+    expect(text(get)).toContain('"api_key_id": "key_123"');
+    expect(text(get)).not.toContain("cn_live_secret");
     expect(text(revoked)).toContain('"revoked_at": "2026-06-12T12:01:00.000Z"');
   });
 });
 
 describe("Project tools", () => {
-  it("creates Projects through the SDK", async () => {
+  it("creates and lists Projects through the SDK", async () => {
     const { client, tools } = createHarness();
     client.mocks.createProject.mockResolvedValueOnce(project());
+    client.mocks.listProjects.mockResolvedValueOnce([project()]);
 
     const result = await callTool(tools, "create_project", {
       name: "Agent Workspace",
     });
+    const list = await callTool(tools, "list_projects", {});
 
     expect(client.mocks.createProject).toHaveBeenCalledWith({
       name: "Agent Workspace",
     });
+    expect(client.mocks.listProjects).toHaveBeenCalledWith();
     expect(text(result)).toContain('"project_id": "prj_123"');
     expect(text(result)).toContain('"name": "Agent Workspace"');
+    expect(text(list)).toContain('"project_id": "prj_123"');
   });
 });
 

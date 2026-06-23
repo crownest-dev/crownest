@@ -35,7 +35,7 @@ def test_sync_client_creates_sandbox_handle_and_runs_command() -> None:
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    sandbox = client.sandboxes.create(project_id="prj_123", template="python")
+    sandbox = client.sandboxes.create(project_id="prj_123", template="python-node")
     extended = sandbox.extend(ttl_ms=5_400_000, idempotency_key="extend-key")
     command = extended.commands.run(
         "python main.py",
@@ -53,7 +53,7 @@ def test_sync_client_creates_sandbox_handle_and_runs_command() -> None:
     assert requests[0].headers["idempotency-key"]
     assert json.loads(requests[0].content) == {
         "projectId": "prj_123",
-        "template": "python",
+        "template": "python-node",
     }
     assert requests[1].headers["idempotency-key"] == "extend-key"
     assert json.loads(requests[1].content) == {"ttlMs": 5_400_000}
@@ -415,7 +415,7 @@ def test_sync_code_interpreter_routes() -> None:
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    sandbox = client.sandboxes.create(template="python")
+    sandbox = client.sandboxes.create(template="python-node")
     context = sandbox.code.create_context(
         cwd="/workspace", language="typescript", timeout_ms=30_000
     )
@@ -557,7 +557,7 @@ async def test_async_code_interpreter_routes() -> None:
         base_url="https://api.test",
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     ) as client:
-        sandbox = await client.sandboxes.create(template="python")
+        sandbox = await client.sandboxes.create(template="python-node")
         context = await sandbox.code.create_context(
             idempotency_key="context-key", language="typescript"
         )
@@ -1090,7 +1090,7 @@ async def test_async_client_surface_and_sse_stream() -> None:
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     ) as client:
         assert (await client.projects.list())[0]["id"] == "prj_123"
-        sandbox = await client.sandboxes.create(template="python")
+        sandbox = await client.sandboxes.create(template="python-node")
         assert sandbox.id == "sbx_123"
         assert (await sandbox.files.write("/workspace/input.txt", "hello"))["path"]
         command = await client.commands.run(
@@ -1108,7 +1108,7 @@ async def test_async_client_surface_and_sse_stream() -> None:
 
     assert events == [{"type": "heartbeat", "createdAt": "now"}]
     assert requests[1].headers["idempotency-key"]
-    assert json.loads(requests[1].content) == {"template": "python"}
+    assert json.loads(requests[1].content) == {"template": "python-node"}
     assert json.loads(requests[2].content) == {
         "content": "hello",
         "path": "/workspace/input.txt",
@@ -1120,6 +1120,251 @@ async def test_async_client_surface_and_sse_stream() -> None:
         "command": "python main.py",
         "timeoutMs": 120_000,
     }
+
+
+def test_sync_workspace_run_routes_and_transfer_auth() -> None:
+    requests: list[httpx.Request] = []
+    transfer = workspace_run_transfer("https://uploads.test/wsr_123/upl_123")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path == "/v1/workspace-runs" and request.method == "POST":
+            return json_response({"workspaceRun": workspace_run_body()})
+        if path == "/v1/workspace-runs/wsr_123/archive":
+            return json_response(
+                {
+                    "archive": workspace_archive_body(),
+                    "workspaceRun": workspace_run_body(status="archive_uploaded"),
+                }
+            )
+        if path == "/v1/workspace-runs/wsr_123/archive-transfer":
+            return json_response({"transfer": transfer})
+        if str(request.url) == transfer["uploadUrl"]:
+            return httpx.Response(204)
+        if str(request.url) == "https://api.test/v1/workspace-runs/wsr_123/archive-transfer/upl_same":
+            return httpx.Response(204)
+        if path == "/v1/workspace-runs/wsr_123/archive/finalize":
+            return json_response(
+                {
+                    "archive": workspace_archive_body(),
+                    "workspaceRun": workspace_run_body(status="archive_uploaded"),
+                }
+            )
+        if path == "/v1/workspace-runs/wsr_123/start":
+            return json_response({"workspaceRun": workspace_run_body(status="running")})
+        if path == "/v1/workspace-runs/wsr_123" and request.method == "GET":
+            return json_response({"workspaceRun": workspace_run_body(status="running")})
+        if path == "/v1/workspace-runs" and request.method == "GET":
+            return json_response({"data": [workspace_run_body()], "hasMore": False})
+        if path == "/v1/workspace-runs/wsr_123/events":
+            if request.url.params.get("stream") == "true":
+                return httpx.Response(
+                    200,
+                    content=(
+                        b'data: {"type":"status","seq":2,"status":"running",'
+                        b'"createdAt":"now"}\n\n'
+                        b'data: {"type":"terminal","seq":3,"createdAt":"now",'
+                        b'"workspaceRun":'
+                        + json.dumps(workspace_run_body(status="succeeded")).encode()
+                        + b"}\n\n"
+                    ),
+                    headers={"content-type": "text/event-stream"},
+                )
+            return json_response(
+                {
+                    "data": [
+                        {
+                            "createdAt": "now",
+                            "seq": 2,
+                            "status": "running",
+                            "type": "status",
+                        }
+                    ],
+                    "hasMore": False,
+                    "nextSeq": 2,
+                }
+            )
+        if path == "/v1/workspace-runs/wsr_123/cancel":
+            return json_response({"workspaceRun": workspace_run_body(status="canceled")})
+        if path == "/v1/workspace-runs/wsr_123/evidence":
+            return json_response({"evidence": workspace_run_evidence_body()})
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    client = CrowNest(
+        api_key="cnk_test",
+        base_url="https://api.test",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    run = client.workspace_runs.create(
+        command="pnpm test",
+        artifacts=[{"path": "coverage/lcov.info", "name": "coverage"}],
+        idempotency_key="create-run",
+        keep_sandbox=True,
+        metadata={"agent": "codex"},
+        project_id="prj_123",
+        source_metadata={"branch": "main"},
+        template="python-node",
+        timeout_ms=120_000,
+    )
+    direct = client.workspace_runs.upload_archive(
+        "wsr_123",
+        b"repo",
+        sha256="a" * 64,
+        size_bytes=4,
+        idempotency_key="upload-run",
+    )
+    created_transfer = client.workspace_runs.create_archive_transfer(
+        "wsr_123",
+        sha256="a" * 64,
+        size_bytes=4,
+        idempotency_key="transfer-run",
+    )
+    client.workspace_runs.upload_archive_to_transfer(created_transfer, b"repo")
+    client.workspace_runs.upload_archive_to_transfer(
+        workspace_run_transfer(
+            "https://api.test/v1/workspace-runs/wsr_123/archive-transfer/upl_same"
+        ),
+        body=b"repo",
+    )
+    finalized = client.workspace_runs.finalize_archive(
+        "wsr_123",
+        sha256="a" * 64,
+        size_bytes=4,
+        upload_id="upl_123",
+        idempotency_key="finalize-run",
+    )
+    started = client.workspace_runs.start("wsr_123", idempotency_key="start-run")
+    got = client.workspace_runs.get("wsr_123")
+    listed = client.workspace_runs.list(
+        metadata={"agent": "codex"},
+        project_id="prj_123",
+        status="running",
+    )
+    events_page = client.workspace_runs.list_events("wsr_123", after_seq=1, limit=10)
+    streamed = list(
+        client.workspace_runs.stream_events("wsr_123", after_seq=1, reconnect=False)
+    )
+    canceled = client.workspace_runs.cancel("wsr_123", idempotency_key="cancel-run")
+    evidence = client.workspace_runs.evidence("wsr_123")
+
+    assert run["id"] == "wsr_123"
+    assert direct["archive"]["sha256"] == "a" * 64
+    assert finalized["workspaceRun"]["status"] == "archive_uploaded"
+    assert started["status"] == "running"
+    assert got["id"] == "wsr_123"
+    assert listed[0]["id"] == "wsr_123"
+    assert events_page["nextSeq"] == 2
+    assert [event["type"] for event in streamed] == ["status", "terminal"]
+    assert canceled["status"] == "canceled"
+    assert evidence["workspaceRunId"] == "wsr_123"
+    assert requests[0].headers["idempotency-key"] == "create-run"
+    assert json.loads(requests[0].content) == {
+        "artifacts": [{"name": "coverage", "path": "coverage/lcov.info"}],
+        "command": "pnpm test",
+        "keepSandbox": True,
+        "metadata": {"agent": "codex"},
+        "projectId": "prj_123",
+        "sourceMetadata": {"branch": "main"},
+        "template": "python-node",
+        "timeoutMs": 120_000,
+    }
+    assert requests[1].content == b"repo"
+    assert requests[1].headers["authorization"] == "Bearer cnk_test"
+    assert requests[1].headers["content-type"] == "application/gzip"
+    assert requests[1].headers["x-crownest-archive-sha256"] == "a" * 64
+    assert requests[3].headers.get("authorization") is None
+    assert requests[3].headers["x-upload-token"] == "token"
+    assert requests[4].headers["authorization"] == "Bearer cnk_test"
+    assert requests[8].url.query == b"projectId=prj_123&status=running&metadata.agent=codex"
+    assert requests[9].url.query == b"afterSeq=1&limit=10"
+    assert requests[10].url.query == b"afterSeq=1&stream=true"
+
+
+def test_sync_transfer_auth_normalizes_default_base_url_port() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(204)
+
+    client = CrowNest(
+        api_key="cnk_test",
+        base_url="https://api.test:443",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    client.workspace_runs.upload_archive_to_transfer(
+        workspace_run_transfer(
+            "https://api.test/v1/workspace-runs/wsr_123/archive-transfer/upl_same"
+        ),
+        body=b"repo",
+    )
+
+    assert requests[0].headers["authorization"] == "Bearer cnk_test"
+
+
+@pytest.mark.asyncio
+async def test_async_workspace_run_routes_and_stream() -> None:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path == "/v1/workspace-runs" and request.method == "POST":
+            return json_response({"workspaceRun": workspace_run_body()})
+        if path == "/v1/workspace-runs/wsr_123/start":
+            return json_response({"workspaceRun": workspace_run_body(status="running")})
+        if path == "/v1/workspace-runs/wsr_123/archive-transfer/upl_async":
+            return httpx.Response(200)
+        if path == "/v1/workspace-runs/wsr_123/events":
+            if request.url.params.get("stream") == "true":
+                return httpx.Response(
+                    200,
+                    content=(
+                        b'data: {"type":"terminal","seq":1,"createdAt":"now",'
+                        b'"workspaceRun":'
+                        + json.dumps(workspace_run_body(status="succeeded")).encode()
+                        + b"}\n\n"
+                    ),
+                    headers={"content-type": "text/event-stream"},
+                )
+            return json_response({"data": [], "hasMore": False})
+        if path == "/v1/workspace-runs/wsr_123/evidence":
+            return json_response({"evidence": workspace_run_evidence_body()})
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    async with AsyncCrowNest(
+        api_key="cnk_test",
+        base_url="https://api.test",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ) as client:
+        run = await client.workspace_runs.create(command="pnpm test")
+        started = await client.workspace_runs.start("wsr_123")
+        await client.workspace_runs.upload_archive_to_transfer(
+            workspace_run_transfer(
+                "https://api.test/v1/workspace-runs/wsr_123/archive-transfer/upl_async"
+            ),
+            body=b"repo",
+        )
+        events_page = await client.workspace_runs.list_events("wsr_123")
+        streamed = [
+            event
+            async for event in client.workspace_runs.stream_events(
+                "wsr_123", reconnect=False
+            )
+        ]
+        evidence = await client.workspace_runs.evidence("wsr_123")
+
+    assert run["id"] == "wsr_123"
+    assert started["status"] == "running"
+    assert events_page["hasMore"] is False
+    assert streamed[0]["type"] == "terminal"
+    assert evidence["workspaceRunId"] == "wsr_123"
+    assert requests[0].headers["idempotency-key"]
+    assert requests[2].content == b"repo"
+    assert requests[4].url.query == b"stream=true"
 
 
 def json_response(body: object) -> httpx.Response:
@@ -1134,8 +1379,8 @@ def sandbox_body(**overrides: object) -> dict[str, object]:
         "orgId": "org_123",
         "projectId": "prj_123",
         "status": "ready",
-        "templateId": "tpl_python",
-        "templateSlug": "python",
+        "templateId": "tpl_python_node",
+        "templateSlug": "python-node",
         "templateVersion": "2026-06-01",
         "templateVersionId": "tplv_123",
         "ttlMs": 3_600_000,
@@ -1239,4 +1484,60 @@ def preview_body(*, auth_mode: str = "authenticated") -> dict[str, object]:
         "sandboxId": "sbx_123",
         "slug": "preview",
         "url": "https://preview.test",
+    }
+
+
+def workspace_run_body(status: str = "awaiting_archive") -> dict[str, object]:
+    return {
+        "command": "pnpm test",
+        "createdAt": "2026-06-09T15:30:00.000Z",
+        "id": "wsr_123",
+        "keepSandbox": True,
+        "metadata": {"agent": "codex"},
+        "orgId": "org_123",
+        "projectId": "prj_123",
+        "status": status,
+        "templateId": "tpl_python_node",
+        "templateSlug": "python-node",
+        "templateVersion": "2026-06-01",
+        "templateVersionId": "tplv_123",
+    }
+
+
+def workspace_archive_body() -> dict[str, object]:
+    return {
+        "sha256": "a" * 64,
+        "sizeBytes": 4,
+        "uploadedAt": "2026-06-09T15:31:00.000Z",
+    }
+
+
+def workspace_run_transfer(upload_url: str) -> dict[str, object]:
+    return {
+        "checksumAlgorithm": "sha256",
+        "expiresAt": "2026-06-09T15:40:00.000Z",
+        "headers": {"x-upload-token": "token"},
+        "id": "upl_123",
+        "maxSizeBytes": 1_000,
+        "method": "PUT",
+        "status": "pending",
+        "uploadUrl": upload_url,
+        "workspaceRunId": "wsr_123",
+    }
+
+
+def workspace_run_evidence_body() -> dict[str, object]:
+    return {
+        "artifactErrors": [],
+        "artifactIds": [],
+        "cleanupStatus": "succeeded",
+        "command": "pnpm test",
+        "createdAt": "2026-06-09T15:30:00.000Z",
+        "envKeys": [],
+        "metadata": {"agent": "codex"},
+        "orchestrationSucceeded": True,
+        "orgId": "org_123",
+        "projectId": "prj_123",
+        "status": "succeeded",
+        "workspaceRunId": "wsr_123",
     }

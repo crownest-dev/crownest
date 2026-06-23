@@ -30,6 +30,40 @@ export function registerWriteFile(server: McpServer, session: McpSession): void 
   );
 }
 
+export function registerWriteFileBytes(server: McpServer, session: McpSession): void {
+  server.registerTool(
+    "write_file_bytes",
+    {
+      description:
+        "Write a small binary file in a CrowNest Sandbox Workspace from base64 content. Direct byte writes are API-bounded; use staged uploads or Artifacts for larger files.",
+      inputSchema: z.object({
+        content_base64: z.string(),
+        create_parents: z.boolean().optional(),
+        overwrite: z.boolean().optional(),
+        path: z.string(),
+        sandbox_id: sandboxIdSchema.optional(),
+      }),
+    },
+    (input) =>
+      handleTool(async () => {
+        const sandbox = await session.resolveSandbox(
+          input.sandbox_id as `sbx_${string}` | undefined,
+        );
+        const file = await sandbox.files.writeBytes(
+          input.path,
+          Buffer.from(input.content_base64, "base64"),
+          {
+            ...(input.create_parents === undefined
+              ? {}
+              : { createParents: input.create_parents }),
+            ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
+          },
+        );
+        return jsonTextResult({ file, sandbox_id: sandbox.id });
+      }),
+  );
+}
+
 export function registerReadFile(server: McpServer, session: McpSession): void {
   server.registerTool(
     "read_file",
@@ -49,6 +83,60 @@ export function registerReadFile(server: McpServer, session: McpSession): void {
         const content = await sandbox.files.read(input.path, { encoding: "utf8" });
         return jsonTextResult({
           content,
+          path: input.path,
+          sandbox_id: sandbox.id,
+        });
+      }),
+  );
+}
+
+export function registerReadFileBytes(server: McpServer, session: McpSession): void {
+  server.registerTool(
+    "read_file_bytes",
+    {
+      description:
+        "Read a small binary file from a CrowNest Sandbox Workspace as base64 content. Direct byte reads are API-bounded; use get_file_download_url or Artifacts for larger files.",
+      inputSchema: z.object({
+        path: z.string(),
+        sandbox_id: sandboxIdSchema.optional(),
+      }),
+    },
+    (input) =>
+      handleTool(async () => {
+        const sandbox = await session.resolveSandbox(
+          input.sandbox_id as `sbx_${string}` | undefined,
+        );
+        const bytes = await sandbox.files.readBytes(input.path);
+        return jsonTextResult({
+          content_base64: Buffer.from(bytes).toString("base64"),
+          path: input.path,
+          sandbox_id: sandbox.id,
+        });
+      }),
+  );
+}
+
+export function registerGetFileDownloadUrl(
+  server: McpServer,
+  session: McpSession,
+): void {
+  server.registerTool(
+    "get_file_download_url",
+    {
+      description:
+        "Create or reuse a short-lived download URL for a file in a CrowNest Sandbox Workspace. Use this for larger files instead of direct read_file or read_file_bytes payloads.",
+      inputSchema: z.object({
+        path: z.string(),
+        sandbox_id: sandboxIdSchema.optional(),
+      }),
+    },
+    (input) =>
+      handleTool(async () => {
+        const sandbox = await session.resolveSandbox(
+          input.sandbox_id as `sbx_${string}` | undefined,
+        );
+        return jsonTextResult({
+          ...(await sandbox.files.downloadUrl(input.path)),
           path: input.path,
           sandbox_id: sandbox.id,
         });

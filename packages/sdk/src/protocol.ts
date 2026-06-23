@@ -1,3 +1,5 @@
+/* eslint-disable max-lines-per-function -- Transport construction keeps shared request auth behavior together. */
+
 import type {
   ApiErrorResponse,
   CancelCommandResponse,
@@ -11,6 +13,7 @@ import type {
 export type CrowNestClientOptions = {
   readonly apiKey?: string;
   readonly baseUrl?: string;
+  readonly credential?: string;
   readonly fetch?: typeof fetch;
 };
 
@@ -30,6 +33,7 @@ export class CrowNestApiError extends Error {
 
 export type Transport = {
   download(url: string): Promise<Uint8Array>;
+  raw(url: string, init: RawRequestInit): Promise<Response>;
   request<T>(path: string, init: ApiRequestInit): Promise<T>;
   streamSse<T>(path: string, init?: ApiStreamInit): AsyncIterable<T>;
 };
@@ -60,14 +64,24 @@ type ApiStreamInit = {
   readonly method?: "GET" | "POST";
 };
 
+type RawRequestInit = {
+  readonly apiError?: boolean;
+  readonly auth?: boolean | "same-origin";
+  readonly body?: BodyInit;
+  readonly headers?: HeadersInit;
+  readonly idempotencyKey?: string;
+  readonly idempotent?: boolean;
+  readonly method: "GET" | "POST" | "PUT";
+};
+
 export function createTransport(options: CrowNestClientOptions): Transport {
   const baseUrl = (options.baseUrl ?? "https://api.crownest.dev").replace(/\/$/, "");
   const fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
-  const apiKey = options.apiKey ?? readEnvApiKey();
+  const credential = options.credential ?? options.apiKey ?? readEnvCredential();
 
-  if (apiKey === undefined || apiKey.length === 0) {
+  if (credential === undefined || credential.length === 0) {
     throw new Error(
-      "CrowNest API key missing. Pass { apiKey } to createCrowNestClient or set CROWNEST_API_KEY.",
+      "CrowNest bearer credential missing. Pass { credential } to createCrowNestClient or set CROWNEST_BEARER_TOKEN. CROWNEST_API_KEY remains supported for developer API keys.",
     );
   }
 
@@ -76,7 +90,7 @@ export function createTransport(options: CrowNestClientOptions): Transport {
       const headers = new Headers();
       headers.set("accept", "application/octet-stream");
 
-      headers.set("authorization", `Bearer ${apiKey}`);
+      headers.set("authorization", `Bearer ${credential}`);
 
       const response = await fetchImpl(resolveUrl(baseUrl, url), {
         headers,
@@ -89,11 +103,42 @@ export function createTransport(options: CrowNestClientOptions): Transport {
 
       return new Uint8Array(await response.arrayBuffer());
     },
+    async raw(url, init) {
+      const headers = new Headers(init.headers);
+      const resolvedUrl = resolveUrl(baseUrl, url);
+
+      if (shouldAuthenticateRawRequest(baseUrl, resolvedUrl, init.auth)) {
+        headers.set("authorization", `Bearer ${credential}`);
+      }
+
+      if (init.idempotencyKey !== undefined) {
+        headers.set("idempotency-key", init.idempotencyKey);
+      } else if (init.idempotent) {
+        headers.set("idempotency-key", createIdempotencyKey());
+      }
+
+      const requestInit: RequestInit & { readonly duplex?: "half" } = {
+        ...(init.body === undefined ? {} : { body: init.body }),
+        ...(isReadableStreamBody(init.body) ? { duplex: "half" } : {}),
+        headers,
+        method: init.method,
+      };
+      const response = await fetchImpl(resolvedUrl, requestInit);
+
+      if (!response.ok) {
+        if (init.apiError === false) {
+          throw new Error(`Request failed with status ${response.status}.`);
+        }
+        throw await parseErrorResponse(response);
+      }
+
+      return response;
+    },
     async request<T>(path: string, init: ApiRequestInit) {
       const headers = new Headers();
       headers.set("accept", "application/json");
 
-      headers.set("authorization", `Bearer ${apiKey}`);
+      headers.set("authorization", `Bearer ${credential}`);
 
       if (init.body !== undefined) {
         headers.set("content-type", "application/json");
@@ -121,7 +166,7 @@ export function createTransport(options: CrowNestClientOptions): Transport {
       const headers = new Headers();
       headers.set("accept", "text/event-stream");
 
-      headers.set("authorization", `Bearer ${apiKey}`);
+      headers.set("authorization", `Bearer ${credential}`);
 
       if (init.body !== undefined) {
         headers.set("content-type", "application/json");
@@ -157,7 +202,7 @@ export function createTransport(options: CrowNestClientOptions): Transport {
   };
 }
 
-function readEnvApiKey(): string | undefined {
+function readEnvCredential(): string | undefined {
   // The SDK must keep working in non-Node runtimes (Workers, browsers),
   // where the process global does not exist.
   const nodeProcess = (
@@ -166,7 +211,7 @@ function readEnvApiKey(): string | undefined {
     }
   ).process;
 
-  return nodeProcess?.env?.CROWNEST_API_KEY;
+  return nodeProcess?.env?.CROWNEST_BEARER_TOKEN ?? nodeProcess?.env?.CROWNEST_API_KEY;
 }
 
 async function parseErrorResponse(response: Response): Promise<CrowNestApiError> {
@@ -191,6 +236,20 @@ function resolveUrl(baseUrl: string, value: string): string {
   }
 
   return `${baseUrl}/${value}`;
+}
+
+function isReadableStreamBody(body: BodyInit | undefined): boolean {
+  return typeof ReadableStream !== "undefined" && body instanceof ReadableStream;
+}
+
+function shouldAuthenticateRawRequest(
+  baseUrl: string,
+  targetUrl: string,
+  auth: RawRequestInit["auth"],
+): boolean {
+  if (auth === false) return false;
+  if (auth !== "same-origin") return true;
+  return new URL(baseUrl).origin === new URL(targetUrl).origin;
 }
 
 export async function cancelCommand(
@@ -360,3 +419,5 @@ function createIdempotencyKey(): string {
 
   return `idem_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
+
+/* eslint-enable max-lines-per-function -- End transport construction helpers. */

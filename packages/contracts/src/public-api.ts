@@ -20,6 +20,13 @@ import type {
   RunCodeResult,
   Sandbox,
   UsageEvent,
+  WorkspaceRun,
+  WorkspaceRunArchive,
+  WorkspaceRunArchiveTransferStatus,
+  WorkspaceRunArtifactRequest,
+  WorkspaceRunEvidenceBundle,
+  WorkspaceRunSourceMetadata,
+  WorkspaceRunStreamEvent,
 } from "./public-resources";
 
 export type ApiErrorResponse = {
@@ -304,6 +311,7 @@ export type UsageSummaryResponse = {
   };
   readonly pricingVersion: string;
   readonly computeUnitSecondsPerCredit: number;
+  readonly currencyPerCredit: number;
   readonly computeUnitSeconds: {
     readonly used: number;
   };
@@ -313,4 +321,88 @@ export type UsageSummaryResponse = {
   };
   readonly quotas: Readonly<Record<string, UsageQuotaBucket>>;
   readonly events?: readonly UsageEvent[];
+};
+
+export type CreateWorkspaceRunBody = {
+  readonly artifacts?: readonly WorkspaceRunArtifactRequest[];
+  readonly command: string;
+  readonly keepSandbox?: boolean;
+  readonly metadata?: Metadata;
+  readonly projectId?: `prj_${string}`;
+  readonly sandboxId?: `sbx_${string}`;
+  readonly sourceMetadata?: WorkspaceRunSourceMetadata;
+  readonly template?: string;
+  readonly templateVersionId?: `tplv_${string}`;
+  readonly timeoutMs?: number;
+};
+
+export type CreateWorkspaceRunResponse = {
+  readonly workspaceRun: WorkspaceRun;
+};
+
+export type UploadWorkspaceRunArchiveRequest = {
+  readonly bytes: Uint8Array;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+};
+
+export type UploadWorkspaceRunArchiveResponse = {
+  readonly archive: WorkspaceRunArchive;
+  readonly workspaceRun: WorkspaceRun;
+};
+
+export type CreateWorkspaceRunArchiveTransferBody = {
+  readonly sha256: string;
+  readonly sizeBytes: number;
+};
+
+export type WorkspaceRunArchiveTransfer = {
+  readonly id: `upl_${string}`;
+  readonly checksumAlgorithm: "sha256";
+  readonly expiresAt: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly maxSizeBytes: number;
+  readonly method: "PUT";
+  readonly status: WorkspaceRunArchiveTransferStatus;
+  readonly uploadUrl: string;
+  readonly workspaceRunId: `wsr_${string}`;
+};
+
+export type CreateWorkspaceRunArchiveTransferResponse = {
+  readonly transfer: WorkspaceRunArchiveTransfer;
+};
+
+export type FinalizeWorkspaceRunArchiveBody = {
+  readonly sha256: string;
+  readonly sizeBytes: number;
+  readonly uploadId: `upl_${string}`;
+};
+
+export type FinalizeWorkspaceRunArchiveResponse = {
+  readonly archive: WorkspaceRunArchive;
+  readonly workspaceRun: WorkspaceRun;
+};
+
+export type StartWorkspaceRunResponse = {
+  readonly workspaceRun: WorkspaceRun;
+};
+
+export type ListWorkspaceRunsResponse = Pagination<WorkspaceRun>;
+
+export type GetWorkspaceRunResponse = {
+  readonly workspaceRun: WorkspaceRun;
+};
+
+export type CancelWorkspaceRunResponse = {
+  readonly workspaceRun: WorkspaceRun;
+};
+
+export type ListWorkspaceRunEventsResponse = {
+  readonly data: readonly WorkspaceRunStreamEvent[];
+  readonly hasMore: boolean;
+  readonly nextSeq?: number;
+};
+
+export type GetWorkspaceRunEvidenceResponse = {
+  readonly evidence: WorkspaceRunEvidenceBundle;
 };

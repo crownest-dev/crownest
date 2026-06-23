@@ -19,7 +19,7 @@ import { crownestTools, killSession } from "@crownest/ai-sdk";
 import { generateText, stepCountIs } from "ai";
 
 const tools = crownestTools({
-  template: "python",
+  template: "python-node",
   ttlMs: 15 * 60_000,
 });
 

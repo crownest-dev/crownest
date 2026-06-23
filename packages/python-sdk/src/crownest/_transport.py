@@ -5,6 +5,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
 from typing import Any
+from urllib.parse import ParseResult, urlparse
 
 import httpx
 
@@ -67,6 +68,34 @@ class SyncTransport:
         _raise_for_error(response)
         return response.content
 
+    def raw(
+        self,
+        path: str,
+        *,
+        method: str,
+        content: bytes,
+        headers: Mapping[str, str] | None = None,
+        idempotency_key: str | None = None,
+        idempotent: bool = False,
+        auth: str = "api",
+    ) -> httpx.Response:
+        url = self._url(path)
+        response = self._client.request(
+            method,
+            url,
+            content=content,
+            headers=self._raw_headers(
+                url,
+                accept="application/json",
+                auth=auth,
+                headers=headers,
+                idempotency_key=idempotency_key,
+                idempotent=idempotent,
+            ),
+        )
+        _raise_for_error(response)
+        return response
+
     def stream_sse(
         self,
         path: str,
@@ -111,6 +140,26 @@ class SyncTransport:
         elif idempotent:
             headers["idempotency-key"] = _create_idempotency_key()
         return headers
+
+    def _raw_headers(
+        self,
+        url: str,
+        *,
+        accept: str,
+        auth: str,
+        headers: Mapping[str, str] | None = None,
+        idempotency_key: str | None = None,
+        idempotent: bool = False,
+    ) -> dict[str, str]:
+        request_headers = {"accept": accept}
+        if _should_send_auth(auth, self._base_url, url):
+            request_headers["authorization"] = f"Bearer {self._api_key}"
+        if idempotency_key is not None:
+            request_headers["idempotency-key"] = idempotency_key
+        elif idempotent:
+            request_headers["idempotency-key"] = _create_idempotency_key()
+        request_headers.update(headers or {})
+        return request_headers
 
     def _url(self, value: str) -> str:
         return _resolve_url(self._base_url, value)
@@ -166,6 +215,34 @@ class AsyncTransport:
         _raise_for_error(response)
         return response.content
 
+    async def raw(
+        self,
+        path: str,
+        *,
+        method: str,
+        content: bytes,
+        headers: Mapping[str, str] | None = None,
+        idempotency_key: str | None = None,
+        idempotent: bool = False,
+        auth: str = "api",
+    ) -> httpx.Response:
+        url = self._url(path)
+        response = await self._client.request(
+            method,
+            url,
+            content=content,
+            headers=self._raw_headers(
+                url,
+                accept="application/json",
+                auth=auth,
+                headers=headers,
+                idempotency_key=idempotency_key,
+                idempotent=idempotent,
+            ),
+        )
+        _raise_for_error(response)
+        return response
+
     async def stream_sse(
         self,
         path: str,
@@ -211,6 +288,26 @@ class AsyncTransport:
         elif idempotent:
             headers["idempotency-key"] = _create_idempotency_key()
         return headers
+
+    def _raw_headers(
+        self,
+        url: str,
+        *,
+        accept: str,
+        auth: str,
+        headers: Mapping[str, str] | None = None,
+        idempotency_key: str | None = None,
+        idempotent: bool = False,
+    ) -> dict[str, str]:
+        request_headers = {"accept": accept}
+        if _should_send_auth(auth, self._base_url, url):
+            request_headers["authorization"] = f"Bearer {self._api_key}"
+        if idempotency_key is not None:
+            request_headers["idempotency-key"] = idempotency_key
+        elif idempotent:
+            request_headers["idempotency-key"] = _create_idempotency_key()
+        request_headers.update(headers or {})
+        return request_headers
 
     def _url(self, value: str) -> str:
         return _resolve_url(self._base_url, value)
@@ -304,6 +401,37 @@ def _resolve_url(base_url: str, value: str) -> str:
     if value.startswith("/"):
         return f"{base_url}{value}"
     return f"{base_url}/{value}"
+
+
+def _should_send_auth(auth: str, base_url: str, url: str) -> bool:
+    if auth == "api":
+        return True
+    if auth == "same-origin":
+        return _same_origin(base_url, url)
+    if auth == "none":
+        return False
+    raise ValueError(f"Unsupported auth mode: {auth}")
+
+
+def _same_origin(left: str, right: str) -> bool:
+    left_url = urlparse(left)
+    right_url = urlparse(right)
+    return (
+        left_url.scheme,
+        left_url.hostname,
+        _origin_port(left_url),
+    ) == (
+        right_url.scheme,
+        right_url.hostname,
+        _origin_port(right_url),
+    )
+
+
+def _origin_port(url: ParseResult) -> int | None:
+    port = url.port
+    if port is not None:
+        return port
+    return {"http": 80, "https": 443}.get(url.scheme)
 
 
 def _create_idempotency_key() -> str:

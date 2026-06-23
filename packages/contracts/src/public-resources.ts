@@ -40,6 +40,8 @@ export type PreviewAuthMode = "authenticated" | "token";
 
 export type Metadata = Readonly<Record<string, string>>;
 
+export type * from "./workspace-runs";
+
 export type UsageMetric =
   | "artifact_bytes_stored"
   | "code_run_invocations"
@@ -82,6 +84,9 @@ export const ApiKeyScopes = [
   "preview:create",
   "preview:read",
   "preview:revoke",
+  "workspace_run:create",
+  "workspace_run:read",
+  "workspace_run:cancel",
   "backup:create",
   "backup:read",
   "backup:restore",
@@ -288,6 +293,7 @@ export type Artifact = {
   readonly sourcePath?: string;
   readonly createdAt: string;
   readonly deletedAt?: string;
+  readonly retentionExpiresAt?: string;
 };
 
 export type FileEntry = FileStat & {

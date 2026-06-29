@@ -173,7 +173,6 @@ async function logsWorkspaceRun(
   const json = booleanFlag(parsed.flags, "--json");
   for await (const event of client().workspaceRuns.streamEvents(workspaceRunId, {
     ...(afterSeq === undefined ? {} : { afterSeq }),
-    reconnect: false,
   })) {
     if (json) {
       stdout += writeJsonEvent(event, output);

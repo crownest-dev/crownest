@@ -347,7 +347,12 @@ function registerWorkspaceRunCliTests() {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
         new Response(
-          'event: stdout\ndata: {"type":"stdout","seq":1,"data":"out\\n","createdAt":"2026-06-17T12:00:01.000Z"}\n\n',
+          [
+            'event: stdout\ndata: {"type":"stdout","seq":1,"data":"out\\n","createdAt":"2026-06-17T12:00:01.000Z"}',
+            "",
+            'event: terminal\ndata: {"type":"terminal","seq":2,"createdAt":"2026-06-17T12:00:02.000Z","workspaceRun":{"id":"wsr_123","status":"succeeded","command":"pnpm test","keepSandbox":false,"metadata":{},"orgId":"org_123","projectId":"prj_123","templateId":"tpl_python_node","templateSlug":"python-node","templateVersion":"2026-06-17","templateVersionId":"tplv_123","createdAt":"2026-06-17T12:00:00.000Z","exitCode":0}}',
+            "",
+          ].join("\n"),
           { headers: { "content-type": "text/event-stream" } },
         ),
       );
@@ -366,6 +371,9 @@ function registerWorkspaceRunCliTests() {
     );
 
     expect(result.stdout).toBe("");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.test/v1/workspace-runs/wsr_123/events?stream=true",
+    );
     expect(stdoutWrite).toHaveBeenCalledWith(
       '{"data":{"type":"stdout","seq":1,"data":"out\\n","createdAt":"2026-06-17T12:00:01.000Z"}}\n',
     );
@@ -1114,6 +1122,46 @@ function registerUsageAndOutputTests() {
     });
   });
 
+  it("renders unknown commands as JSON errors in JSON mode", async () => {
+    const result = await runCli(["bogus", "--json"]);
+
+    expect(result.exitCode).toBe(2);
+    expect(JSON.parse(result.stderr) as unknown).toEqual({
+      error: {
+        code: "unknown_command",
+        details: null,
+        message:
+          "Unknown command: bogus --json. Run `crownest --help` for the command list.",
+        remediation: null,
+        retryable: false,
+        status: null,
+      },
+    });
+  });
+
+  it("renders usage failures as JSON errors in JSON mode", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const result = await runCli(
+      ["sandboxes", "extend", "sbx_123", "--ttl-ms", "0", "--json"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(JSON.parse(result.stderr) as unknown).toMatchObject({
+      error: {
+        code: "usage_error",
+        message: "--ttl-ms must be a positive integer.",
+        retryable: false,
+        status: null,
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects unknown flags before making a request", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     const result = await runCli(
@@ -1378,6 +1426,41 @@ function registerUsageAndOutputTests() {
     expect(result.stderr).toContain("error[quota_exceeded]: Sandbox quota exceeded.");
     expect(result.stderr).toContain("status: 403");
     expect(result.stderr).toContain('"limit": 3');
+  });
+
+  it("renders API failures as JSON errors in JSON mode", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "quota_exceeded",
+            details: { limit: 3 },
+            message: "Sandbox quota exceeded.",
+          },
+        }),
+        { headers: { "content-type": "application/json" }, status: 403 },
+      ),
+    );
+    const result = await runCli(
+      ["projects", "list", "--json"],
+      {
+        CROWNEST_API_KEY: "cn_live_test",
+        CROWNEST_API_URL: "https://api.test",
+      },
+      fetchMock,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stderr) as unknown).toEqual({
+      error: {
+        code: "quota_exceeded",
+        details: { limit: 3 },
+        message: "Sandbox quota exceeded.",
+        remediation: null,
+        retryable: false,
+        status: 403,
+      },
+    });
   });
 }
 

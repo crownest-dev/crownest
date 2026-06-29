@@ -7,6 +7,26 @@ export function jsonEnvelope(value: unknown): string {
   return `${JSON.stringify({ data: sanitizeForOutput(value) })}\n`;
 }
 
+export function jsonErrorEnvelope(error: {
+  readonly code: string;
+  readonly details?: Readonly<Record<string, unknown>> | null;
+  readonly message: string;
+  readonly remediation?: string | null;
+  readonly retryable?: boolean;
+  readonly status?: number | null;
+}): string {
+  return `${JSON.stringify({
+    error: {
+      code: error.code,
+      details: error.details ?? null,
+      message: error.message,
+      remediation: error.remediation ?? null,
+      retryable: error.retryable ?? false,
+      status: error.status ?? null,
+    },
+  })}\n`;
+}
+
 export function renderRecord(record: object): string {
   const entries = Object.entries(toDisplayRecord(record));
   if (entries.length === 0) return "\n";

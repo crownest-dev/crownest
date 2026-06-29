@@ -342,6 +342,6 @@ export type CrowNestClient = {
     list(input?: ListSandboxesInput): Promise<readonly Sandbox[]>;
   };
   readonly workspaceRuns: WorkspaceRunsClient;
-  /** Read current compute usage, credits, and quota buckets. */
+  /** Read current compute usage, spend metadata, and quota buckets. */
   usage(): Promise<UsageSummaryResponse>;
 };

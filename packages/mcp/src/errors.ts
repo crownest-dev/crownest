@@ -5,7 +5,11 @@ import { McpSessionError } from "./session";
 
 export function toolError(error: unknown): CallToolResult {
   if (error instanceof CrowNestApiError) {
-    return errorResult(error.code, error.message);
+    return errorResult(error.code, error.message, {
+      details: error.details ?? null,
+      retryable: retryableApiError(error),
+      status: error.status,
+    });
   }
 
   if (error instanceof McpSessionError) {
@@ -19,14 +23,36 @@ export function toolError(error: unknown): CallToolResult {
   return errorResult("internal_error", String(error));
 }
 
-export function errorResult(code: string, message: string): CallToolResult {
+export function errorResult(
+  code: string,
+  message: string,
+  options: {
+    readonly details?: Readonly<Record<string, unknown>> | null;
+    readonly remediation?: string | null;
+    readonly retryable?: boolean;
+    readonly status?: number | null;
+  } = {},
+): CallToolResult {
   return {
     content: [
       {
-        text: `${code}: ${message}`,
+        text: JSON.stringify({
+          error: {
+            code,
+            details: options.details ?? null,
+            message,
+            remediation: options.remediation ?? null,
+            retryable: options.retryable ?? false,
+            status: options.status ?? null,
+          },
+        }),
         type: "text",
       },
     ],
     isError: true,
   };
+}
+
+function retryableApiError(error: CrowNestApiError): boolean {
+  return error.status === 429 || error.status >= 500 || error.code === "rate_limited";
 }

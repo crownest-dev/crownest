@@ -1,0 +1,41 @@
+{
+  "linkset": [
+    {
+      "anchor": "https://api.crownest.dev",
+      "api-catalog": [
+        {
+          "href": "https://api.crownest.dev/.well-known/api-catalog",
+          "type": "application/linkset+json"
+        }
+      ],
+      "authorization": [
+        {
+          "href": "https://api.crownest.dev/auth.md",
+          "type": "text/markdown"
+        }
+      ],
+      "describedby": [
+        {
+          "href": "https://api.crownest.dev/llms.txt",
+          "type": "text/markdown"
+        },
+        {
+          "href": "https://docs.crownest.dev/llms-full.txt",
+          "type": "text/markdown"
+        }
+      ],
+      "service-desc": [
+        {
+          "href": "https://api.crownest.dev/openapi.json",
+          "type": "application/vnd.oai.openapi+json"
+        }
+      ],
+      "service-doc": [
+        {
+          "href": "https://docs.crownest.dev/docs/api/overview",
+          "type": "text/html"
+        }
+      ]
+    }
+  ]
+}

@@ -36,6 +36,10 @@
       "types": "./src/ids.ts",
       "import": "./src/ids.ts"
     },
+    "./openapi": {
+      "types": "./src/openapi.ts",
+      "import": "./src/openapi.ts"
+    },
     "./resources": {
       "types": "./src/resources/index.ts",
       "import": "./src/resources/index.ts"
@@ -54,6 +58,8 @@
     "dist/errors.d.ts",
     "dist/ids.js",
     "dist/ids.d.ts",
+    "dist/openapi.js",
+    "dist/openapi.d.ts",
     "README.md",
     "LICENSE"
   ],
@@ -71,6 +77,10 @@
       "./ids": {
         "types": "./dist/ids.d.ts",
         "import": "./dist/ids.js"
+      },
+      "./openapi": {
+        "types": "./dist/openapi.d.ts",
+        "import": "./dist/openapi.js"
       },
       "./resources": {
         "types": "./dist/public-resources.d.ts",

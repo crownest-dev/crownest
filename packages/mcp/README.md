@@ -57,7 +57,7 @@ It lazily creates one default Sandbox on the first stateful tool call. Tools tha
 | `stream_command_logs` | Reads the currently available bounded Command log buffer.                                                                          |
 | `create_sandbox`      | Creates an additional Sandbox for this MCP server session, optionally with `ttl_ms`, without changing the lazy default Sandbox.    |
 | `list_sandboxes`      | Lists live Sandboxes visible to the configured API Key, with optional live status filtering and limit.                             |
-| `get_usage`           | Reads compute usage, credits, quota buckets, and MCP-session Sandbox state.                                                        |
+| `get_usage`           | Reads compute usage, spend metadata, quota buckets, and MCP-session Sandbox state.                                                 |
 | `get_sandbox`         | Inspects a Sandbox by id or the current lazy default Sandbox.                                                                      |
 | `extend_sandbox`      | Resets a live Sandbox TTL from now.                                                                                                |
 | `kill_sandbox`        | Kills a server-created Sandbox. If it was the default Sandbox, the next default call creates a new one.                            |

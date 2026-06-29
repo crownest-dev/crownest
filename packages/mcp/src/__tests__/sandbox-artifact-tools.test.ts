@@ -211,7 +211,11 @@ describe("tool error mapping", () => {
     const result = await callTool(tools, "run_command", { command: "pwd" });
 
     expect(result.isError).toBe(true);
-    expect(text(result)).toBe("unauthorized: bad key");
+    expect(error(result)).toMatchObject({
+      code: "unauthorized",
+      message: "bad key",
+      status: 401,
+    });
   });
 
   it("maps unknown Sandbox ids to stable MCP tool errors", async () => {
@@ -228,8 +232,8 @@ describe("tool error mapping", () => {
 
     expect(command.isError).toBe(true);
     expect(kill.isError).toBe(true);
-    expect(text(command)).toContain("sandbox_not_found:");
-    expect(text(kill)).toContain("sandbox_not_found:");
+    expect(error(command).code).toBe("sandbox_not_found");
+    expect(error(kill).code).toBe("sandbox_not_found");
   });
 
   it("maps non-SDK failures to internal_error without stack traces", async () => {
@@ -246,11 +250,28 @@ describe("tool error mapping", () => {
 
     expect(errorResult.isError).toBe(true);
     expect(valueResult.isError).toBe(true);
-    expect(text(errorResult)).toBe("internal_error: boom");
-    expect(text(valueResult)).toBe("internal_error: bad value");
+    expect(error(errorResult)).toMatchObject({
+      code: "internal_error",
+      message: "boom",
+    });
+    expect(error(valueResult)).toMatchObject({
+      code: "internal_error",
+      message: "bad value",
+    });
     expect(text(errorResult)).not.toContain(" at ");
   });
 });
+
+function error(result: Parameters<typeof text>[0]) {
+  const parsed = JSON.parse(text(result)) as {
+    readonly error: {
+      readonly code: string;
+      readonly message: string;
+      readonly status: number | null;
+    };
+  };
+  return parsed.error;
+}
 
 function artifact() {
   return {

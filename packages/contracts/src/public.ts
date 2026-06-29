@@ -6,5 +6,7 @@ export * from "./public-api";
 export * from "./errors";
 /** Public resource ID prefix helpers. */
 export * from "./ids";
+/** Public OpenAPI route inventory and document. */
+export * from "./openapi";
 /** Public resource shape contracts for installable clients. */
 export * from "./public-resources";

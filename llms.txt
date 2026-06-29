@@ -1,0 +1,27 @@
+# CrowNest public clients
+
+Official open-source clients for CrowNest cloud sandboxes.
+
+## Start here
+
+- Agent instructions: AGENTS.md
+- Examples: examples/README.md
+- Change log: CHANGELOG.md
+- API catalog: https://api.crownest.dev/.well-known/api-catalog
+- OpenAPI: https://api.crownest.dev/openapi.json
+- auth.md: https://api.crownest.dev/auth.md
+- Docs: https://docs.crownest.dev/docs
+
+## Packages
+
+- TypeScript SDK: packages/sdk/README.md
+- Python SDK: packages/python-sdk/README.md
+- CLI: packages/cli/README.md
+- MCP server: packages/mcp/README.md
+- Public contracts: packages/contracts/README.md
+- Vercel AI SDK tools: packages/ai-sdk/README.md
+
+## Evals
+
+- Agent-use ratchet: evals/agent-use/README.md
+- Verify everything: pnpm verify

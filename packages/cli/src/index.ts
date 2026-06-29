@@ -46,7 +46,7 @@ import {
   listApiKeysCommand,
   loginCommand,
 } from "./human-commands";
-import { jsonEnvelope, renderList, renderRecord } from "./output";
+import { jsonEnvelope, jsonErrorEnvelope, renderList, renderRecord } from "./output";
 import {
   createPreviewCommand,
   listPreviewsCommand,
@@ -130,7 +130,7 @@ export type CliOutput = {
 
 export type CliInput = AsyncIterable<string> | Iterable<string>;
 
-// eslint-disable-next-line complexity -- Routing mirrors the public CLI command surface.
+// eslint-disable-next-line complexity, max-lines-per-function -- Routing mirrors the public CLI command surface.
 export async function runCli(
   argv: readonly string[],
   environment: CliEnvironment = {},
@@ -138,6 +138,8 @@ export async function runCli(
   output?: CliOutput,
   input?: CliInput,
 ): Promise<CliResult> {
+  const wantsJson = wantsJsonOutput(argv);
+
   if (argv[0] === "--version" || argv[0] === "-V") {
     return ok(`${packageJson.version}\n`);
   }
@@ -197,22 +199,34 @@ export async function runCli(
             : handlers[command];
 
   try {
-    if (handler) return await handler();
+    if (handler) return normalizeCliResult(await handler(), wantsJson);
 
-    return fail(
-      `Unknown command: ${argv.join(" ") || "(empty)"}. Run \`crownest --help\` for the command list.\n`,
+    return failError(
+      {
+        code: "unknown_command",
+        message: `Unknown command: ${argv.join(" ") || "(empty)"}. Run \`crownest --help\` for the command list.`,
+      },
       CLI_EXIT_USAGE_ERROR,
+      wantsJson,
     );
   } catch (error) {
     if (error instanceof UsageError) {
-      return fail(`${error.message}\n`, CLI_EXIT_USAGE_ERROR);
+      return failError(
+        { code: "usage_error", message: error.message },
+        CLI_EXIT_USAGE_ERROR,
+        wantsJson,
+      );
     }
     if (error instanceof CrowNestApiError) {
-      return fail(renderApiError(error), CLI_EXIT_API_ERROR);
+      return failApiError(error, wantsJson);
     }
-    return fail(
-      `${error instanceof Error ? error.message : String(error)}\n`,
+    return failError(
+      {
+        code: "runtime_error",
+        message: error instanceof Error ? error.message : String(error),
+      },
       CLI_EXIT_API_ERROR,
+      wantsJson,
     );
   }
 }
@@ -603,6 +617,49 @@ function fail(stderr: string, exitCode: number): CliResult {
   return { exitCode, stderr, stdout: "" };
 }
 
+function failError(
+  error: {
+    readonly code: string;
+    readonly details?: Readonly<Record<string, unknown>> | null;
+    readonly message: string;
+    readonly retryable?: boolean;
+    readonly status?: number | null;
+  },
+  exitCode: number,
+  wantsJson: boolean,
+): CliResult {
+  return fail(wantsJson ? jsonErrorEnvelope(error) : `${error.message}\n`, exitCode);
+}
+
+function failApiError(error: CrowNestApiError, wantsJson: boolean): CliResult {
+  if (!wantsJson) return fail(renderApiError(error), CLI_EXIT_API_ERROR);
+
+  return fail(
+    jsonErrorEnvelope({
+      code: error.code,
+      details: error.details ?? null,
+      message: error.message,
+      retryable: retryableApiError(error),
+      status: error.status,
+    }),
+    CLI_EXIT_API_ERROR,
+  );
+}
+
+function normalizeCliResult(result: CliResult, wantsJson: boolean): CliResult {
+  if (!wantsJson || result.exitCode === CLI_EXIT_OK || isJsonObject(result.stderr)) {
+    return result;
+  }
+
+  return {
+    ...result,
+    stderr: jsonErrorEnvelope({
+      code: result.exitCode === CLI_EXIT_USAGE_ERROR ? "usage_error" : "runtime_error",
+      message: result.stderr.trim(),
+    }),
+  };
+}
+
 function renderApiError(error: CrowNestApiError): string {
   const lines = [`error[${error.code}]: ${error.message}`, `status: ${error.status}`];
   if (error.details !== undefined) {
@@ -616,6 +673,24 @@ function renderApiError(error: CrowNestApiError): string {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function wantsJsonOutput(argv: readonly string[]): boolean {
+  const separatorIndex = argv.indexOf("--");
+  const optionArgs = separatorIndex < 0 ? argv : argv.slice(0, separatorIndex);
+  return optionArgs.includes("--json");
+}
+
+function retryableApiError(error: CrowNestApiError): boolean {
+  return error.status === 429 || error.status >= 500 || error.code === "rate_limited";
+}
+
+function isJsonObject(value: string): boolean {
+  try {
+    return typeof JSON.parse(value) === "object";
+  } catch {
+    return false;
+  }
 }
 
 async function main() {
